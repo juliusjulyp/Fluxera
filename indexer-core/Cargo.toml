@@ -1,0 +1,46 @@
+[package]
+name = "indexer-core"
+version = "0.1.0"
+edition = "2021"
+authors = ["Fluxera Team"]
+description = "Rust-native indexer for Linera microchains"
+
+[[bin]]
+name = "fluxera"
+path = "src/main.rs"
+
+[dependencies]
+# Async runtime
+tokio = { version = "1.0", features = ["full"] }
+
+# Linera integration
+linera-client = "0.15"
+linera-sdk = "0.15.3"
+linera-base = "0.15"
+linera-execution = "0.15"
+
+# BCS serialization (used by Linera)
+bcs = "0.1"
+
+# Web framework for REST API
+axum = { version = "0.7", features = ["macros"] }
+
+# Database
+sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "sqlite", "postgres", "macros", "chrono", "uuid"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+# GraphQL client for Linera
+reqwest = { version = "0.11", features = ["json"] }
+
+# CLI argument parsing
+clap = { version = "4.0", features = ["derive"] }
+
+# Hex decoding for CryptoHash parsing
+hex = "0.4"
