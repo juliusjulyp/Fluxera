@@ -1,14 +1,16 @@
 use anyhow::Result;
 use axum::{
-    extract::{Path, Query, State},
+    extract::{ws::{WebSocket, WebSocketUpgrade}, Path, Query, State},
     http::StatusCode,
-    response::Json,
+    response::{IntoResponse, Json},
     routing::get,
     Router,
 };
+use futures::{sink::SinkExt, stream::StreamExt};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::net::TcpListener;
+use tower_http::cors::CorsLayer;
 
 use crate::parser::NormalizedEvent;
 use crate::storage::{Database, DatabaseStats};
@@ -85,10 +87,14 @@ impl RestServer {
             .route("/events/recent", get(recent_events_handler))
             .route("/events/microchain/:chain_id", get(microchain_events_handler))
             .route("/events/height/:start/:end", get(height_range_events_handler))
+            .route("/ws", get(websocket_handler))
+            .layer(CorsLayer::permissive())
             .with_state(app_state);
         
+        println!("🔧 Attempting to bind to: {}", addr);
         let listener = TcpListener::bind(addr).await?;
         println!("✅ REST API server listening on: {}", addr);
+        println!("🔧 Actual listener address: {:?}", listener.local_addr());
         println!("📖 Available endpoints:");
         println!("   GET /              - API information");
         println!("   GET /health        - Health check");
@@ -97,7 +103,9 @@ impl RestServer {
         println!("   GET /events/recent - Get recent events");
         println!("   GET /events/microchain/:chain_id - Get events for specific microchain");
         println!("   GET /events/height/:start/:end - Get events in block height range");
+        println!("   WS  /ws            - WebSocket real-time event stream");
         
+        println!("🚀 Starting axum server...");
         axum::serve(listener, app).await?;
         
         Ok(())
@@ -272,4 +280,136 @@ async fn height_range_events_handler(
             Err(StatusCode::INTERNAL_SERVER_ERROR)
         }
     }
+}
+
+/// WebSocket handler for real-time event streaming
+async fn websocket_handler(
+    ws: WebSocketUpgrade,
+    State(database): State<Arc<Database>>,
+) -> impl IntoResponse {
+    println!("🔌 New WebSocket connection request");
+    ws.on_upgrade(move |socket| websocket_connection(socket, database))
+}
+
+/// Handle individual WebSocket connection
+async fn websocket_connection(socket: WebSocket, database: Arc<Database>) {
+    println!("✅ WebSocket connection established");
+
+    let (mut sender, mut receiver) = socket.split();
+
+    // Subscribe to event broadcasts
+    let mut event_receiver = database.subscribe_to_events();
+
+    // Send initial connection success message
+    let welcome_msg = serde_json::json!({
+        "type": "connected",
+        "message": "Real-time event stream connected",
+        "timestamp": chrono::Utc::now().timestamp()
+    });
+
+    match serde_json::to_string(&welcome_msg) {
+        Ok(msg_text) => {
+            if let Err(e) = sender.send(axum::extract::ws::Message::Text(msg_text)).await {
+                println!("❌ Failed to send welcome message: {}", e);
+                return; // Exit early if we can't even send the welcome message
+            }
+            println!("✅ Welcome message sent to client");
+        }
+        Err(e) => {
+            println!("❌ Failed to serialize welcome message: {}", e);
+            return;
+        }
+    }
+
+    // Spawn task to handle incoming messages (ping/pong, etc.)
+    let mut recv_task = tokio::spawn(async move {
+        while let Some(msg_result) = receiver.next().await {
+            match msg_result {
+                Ok(msg) => {
+                    match msg {
+                        axum::extract::ws::Message::Close(_) => {
+                            println!("🔌 Client initiated close");
+                            break;
+                        }
+                        axum::extract::ws::Message::Ping(_) => {
+                            println!("🏓 Received ping from client");
+                            // Axum handles pong automatically
+                        }
+                        axum::extract::ws::Message::Pong(_) => {
+                            println!("🏓 Received pong from client");
+                        }
+                        _ => {
+                            // Ignore other client messages
+                        }
+                    }
+                }
+                Err(e) => {
+                    println!("❌ WebSocket receive error: {}", e);
+                    break;
+                }
+            }
+        }
+        println!("🔌 Receive task ending");
+    });
+
+    // Main loop: forward broadcasted events to WebSocket
+    let mut send_task = tokio::spawn(async move {
+        println!("📡 Send task started, waiting for events...");
+        loop {
+            tokio::select! {
+                // Receive event from broadcast channel
+                event_result = event_receiver.recv() => {
+                    match event_result {
+                        Ok(event) => {
+                            // Serialize event to JSON
+                            match serde_json::to_string(&event) {
+                                Ok(json_str) => {
+                                    // Send to WebSocket client
+                                    if sender.send(axum::extract::ws::Message::Text(json_str)).await.is_err() {
+                                        println!("❌ Failed to send event to WebSocket client");
+                                        break;
+                                    }
+                                    println!("📤 Event sent to WebSocket client: {}", event.id);
+                                }
+                                Err(e) => {
+                                    eprintln!("Failed to serialize event: {}", e);
+                                }
+                            }
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                            println!("⚠️  WebSocket client lagged, skipped {} events", skipped);
+                            // Send a lag notification to client
+                            let lag_msg = serde_json::json!({
+                                "type": "lag_warning",
+                                "skipped_events": skipped,
+                                "message": "Client connection lagged behind event stream"
+                            });
+                            if let Ok(msg_text) = serde_json::to_string(&lag_msg) {
+                                let _ = sender.send(axum::extract::ws::Message::Text(msg_text)).await;
+                            }
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                            println!("📡 Event broadcast channel closed");
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        println!("📡 Send task ending");
+    });
+
+    // Wait for either task to finish
+    tokio::select! {
+        result = (&mut send_task) => {
+            println!("📡 Send task completed: {:?}", result);
+            recv_task.abort();
+        }
+        result = (&mut recv_task) => {
+            println!("🔌 Receive task completed: {:?}", result);
+            send_task.abort();
+        }
+    };
+
+    println!("🔌 WebSocket connection closed");
 }

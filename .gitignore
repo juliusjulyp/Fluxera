@@ -1,5 +1,6 @@
 # Rust
 /target/
+**/target/
 Cargo.lock
 **/*.rs.bk
 
@@ -7,6 +8,8 @@ Cargo.lock
 *.db
 *.sqlite
 *.sqlite3
+*.db-shm
+*.db-wal
 
 # IDE files
 .vscode/
@@ -25,3 +28,20 @@ Thumbs.db
 # Environment files
 .env
 .env.local
+
+# Linera specific
+.linera/
+.linera-*/
+/linera-protocol/
+
+# Temporary files
+*.tmp
+*.temp
+/tmp/
+
+# Node.js (if any Node scripts in root)
+node_modules/
+
+# Build outputs
+/dist/
+/build/

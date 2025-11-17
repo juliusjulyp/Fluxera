@@ -1,28 +1,39 @@
 use anyhow::Result;
 use sqlx::{SqlitePool, Row};
+use tokio::sync::broadcast;
 use crate::parser::NormalizedEvent;
 
 /// Database abstraction for storing normalized events
 #[derive(Clone)]
 pub struct Database {
     pool: SqlitePool,
+    /// Broadcast channel for real-time event notifications
+    event_broadcaster: broadcast::Sender<NormalizedEvent>,
 }
 
 impl Database {
     /// Create a new database connection pool
     pub async fn new() -> Result<Self> {
         println!("🗄️  Initializing SQLite database...");
-        
+
         // Create SQLite database in local file
-        let database_url = "sqlite:fluxera.db";
+        let database_url = "sqlite:fluxera.db?mode=rwc";
         let pool = SqlitePool::connect(database_url).await?;
-        
-        let db = Self { pool };
-        
+
+        // Create broadcast channel for real-time event streaming
+        // Capacity: 100 events buffered if clients are slow to receive
+        let (event_broadcaster, _) = broadcast::channel(100);
+
+        let db = Self {
+            pool,
+            event_broadcaster,
+        };
+
         // Initialize tables
         db.initialize_tables().await?;
-        
+
         println!("✅ Database initialized successfully");
+        println!("📡 Event broadcasting system ready");
         Ok(db)
     }
     
@@ -83,22 +94,25 @@ impl Database {
         Ok(())
     }
     
-    /// Store a normalized event in the database
+    /// Store a normalized event in the database and broadcast to subscribers
     pub async fn store_event(&self, event: NormalizedEvent) -> Result<()> {
         println!("💾 Storing event: {}", event.id);
-        
+
         let transaction_data = event.transaction_data
+            .as_ref()
             .map(|data| serde_json::to_string(&data))
             .transpose()?;
-            
+
         let contract_event_data = event.contract_event_data
+            .as_ref()
             .map(|data| serde_json::to_string(&data))
             .transpose()?;
-            
+
         let state_change_data = event.state_change_data
+            .as_ref()
             .map(|data| serde_json::to_string(&data))
             .transpose()?;
-        
+
         sqlx::query(
             r#"
             INSERT OR REPLACE INTO events (
@@ -117,9 +131,21 @@ impl Database {
         .bind(state_change_data)
         .execute(&self.pool)
         .await?;
-        
+
         println!("✅ Event stored successfully: {}", event.id);
+
+        // Broadcast event to all WebSocket subscribers
+        // We ignore errors here - if no one is listening, that's okay
+        let _ = self.event_broadcaster.send(event.clone());
+        println!("📡 Event broadcasted to subscribers");
+
         Ok(())
+    }
+
+    /// Subscribe to real-time event stream
+    /// Returns a receiver that will get all new events as they're stored
+    pub fn subscribe_to_events(&self) -> broadcast::Receiver<NormalizedEvent> {
+        self.event_broadcaster.subscribe()
     }
     
     /// Get events by microchain ID

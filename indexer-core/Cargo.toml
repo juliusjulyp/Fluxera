@@ -23,7 +23,8 @@ linera-execution = "0.15"
 bcs = "0.1"
 
 # Web framework for REST API
-axum = { version = "0.7", features = ["macros"] }
+axum = { version = "0.7", features = ["macros", "ws"] }
+tower-http = { version = "0.5", features = ["cors"] }
 
 # Database
 sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "sqlite", "postgres", "macros", "chrono", "uuid"] }
@@ -44,3 +45,8 @@ clap = { version = "4.0", features = ["derive"] }
 
 # Hex decoding for CryptoHash parsing
 hex = "0.4"
+
+# WebSocket and async utilities
+futures = "0.3"
+tokio-stream = "0.1"
+chrono = "0.4"

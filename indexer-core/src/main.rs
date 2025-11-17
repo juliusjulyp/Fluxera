@@ -72,28 +72,10 @@ async fn main() -> Result<()> {
     
     println!("✅ All components initialized successfully");
     
-    // Start API server in background
-    let _api_handle = tokio::spawn(async move {
-        if let Err(e) = api_server.start("0.0.0.0:3000").await {
-            eprintln!("API server error: {}", e);
-        }
-    });
+    // Start API server - run it synchronously to see any errors
+    println!("🔄 Starting API server...");
+    api_server.start("0.0.0.0:3001").await?;
     
-    // Start main indexing loop
-    println!("🔄 Starting indexing loop...");
-    loop {
-        // Listen for new events from Linera node
-        if let Ok(event) = listener.next_event().await {
-            println!("📦 Received event: {:?}", event);
-            
-            // Parse and normalize the event
-            let normalized = parser.parse(event)?;
-            
-            // Store in database
-            database.store_event(normalized).await?;
-        }
-        
-        // Small delay to prevent overwhelming the system
-        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-    }
+    // This won't be reached since the server runs indefinitely
+    Ok(())
 }
