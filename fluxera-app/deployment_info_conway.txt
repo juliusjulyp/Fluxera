@@ -1,0 +1,17 @@
+# Fluxera Conway Testnet Deployment
+Network: Conway Testnet
+Faucet URL: https://faucet.testnet-conway.linera.net
+Chain ID: 935947af6cdb0956bd3f58a12a69dbeb14eec700d086e6eaa6faf2ab31d4ea64
+Application ID: d249067da421cbe05fa254ed0c9755dfeb744fd850695990a78d73d598cc8d2d
+
+# GraphQL Endpoint (when service is running):
+http://localhost:8080/chains/935947af6cdb0956bd3f58a12a69dbeb14eec700d086e6eaa6faf2ab31d4ea64/applications/d249067da421cbe05fa254ed0c9755dfeb744fd850695990a78d73d598cc8d2d
+
+# Frontend Configuration:
+Update frontend/lib/constants.ts:
+  CHAIN_ID: "935947af6cdb0956bd3f58a12a69dbeb14eec700d086e6eaa6faf2ab31d4ea64"
+  APPLICATION_ID: "d249067da421cbe05fa254ed0c9755dfeb744fd850695990a78d73d598cc8d2d"
+  GRAPHQL_URL: "http://localhost:8080/chains/935947af6cdb0956bd3f58a12a69dbeb14eec700d086e6eaa6faf2ab31d4ea64/applications/d249067da421cbe05fa254ed0c9755dfeb744fd850695990a78d73d598cc8d2d"
+
+# Start service:
+linera service --port 8080

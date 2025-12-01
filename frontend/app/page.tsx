@@ -1,338 +1,363 @@
+/**
+ * FLUXERA DASHBOARD - MAIN PAGE
+ *
+ * This is the main dashboard that displays real-time analytics from the Fluxera WebAssembly application
+ *
+ * WHAT THIS PAGE DOES:
+ * 1. Connects to Fluxera GraphQL API (deployed Linera WASM app)
+ * 2. Fetches analytics summary, recent events, and chain metrics
+ * 3. Displays data in real-time (auto-refreshes every 5 seconds)
+ * 4. Shows loading states and error handling
+ *
+ * DATA FLOW:
+ * useAnalyticsSummary() hook
+ *   ↓
+ * Apollo Client fetches from http://localhost:8080/.../fluxera_app
+ *   ↓
+ * Fluxera service.rs analytics_summary() function
+ *   ↓
+ * Reads blockchain state (total_event_count, unique_users, etc.)
+ *   ↓
+ * Returns data to component
+ *   ↓
+ * Component renders with live blockchain data!
+ */
+
 "use client";
 
-import { Activity, Database, Globe, Zap, AlertCircle, Loader } from "lucide-react";
-import { useApiConnection, useStats, useRecentEvents, useHealth } from "@/hooks/useFluxeraData";
-import { useWebSocket, WebSocketStatus } from "@/hooks/useWebSocket";
+import { Activity, Database, Globe, Zap, AlertCircle, Loader, TrendingUp } from "lucide-react";
+import { useAnalyticsSummary, useRecentEvents, useAllChainMetrics } from "@/hooks/useFluxera";
+import { FLUXERA_CONFIG } from "@/lib/constants";
+import EventTrackingForm from "@/components/EventTrackingForm";
+import CrossChainMessageForm from "@/components/CrossChainMessageForm";
+import EventsTable from "@/components/EventsTable";
+import Navbar from "@/components/Navbar";
+import Sidebar from "@/components/Sidebar";
 
 export default function Dashboard() {
-  // Fetch real data from Fluxera API
-  const { isConnected, isChecking } = useApiConnection();
-  const { data: healthData, loading: healthLoading, error: healthError } = useHealth();
-  const { data: statsData, loading: statsLoading, error: statsError } = useStats();
-  const { data: recentEvents, loading: eventsLoading, error: eventsError } = useRecentEvents();
+  /**
+   * FETCH DATA FROM FLUXERA WASM APP
+   *
+   * These hooks automatically:
+   * - Fetch data from GraphQL
+   * - Poll every 5 seconds for updates
+   * - Handle loading and error states
+   * - Cache results for performance
+   */
+  const { summary, loading: summaryLoading, error: summaryError } = useAnalyticsSummary();
+  const { events, loading: eventsLoading, error: eventsError } = useRecentEvents({ limit: 5 });
+  const { chains, loading: chainsLoading } = useAllChainMetrics();
 
-  // WebSocket connection for real-time event streaming
-  const {
-    status: wsStatus,
-    events: wsEvents,
-    latestEvent,
-    eventCount: wsEventCount,
-    reconnectAttempts,
-  } = useWebSocket('ws://localhost:3001/ws', true);
+  /**
+   * FORMAT TIMESTAMP
+   *
+   * Converts Fluxera timestamp string to "X seconds/minutes/hours ago"
+   * Timestamp format from Fluxera: "2025-11-29 07:43:39.273921"
+   */
+  const formatTimeAgo = (timestamp: string) => {
+    try {
+      const eventTime = new Date(timestamp).getTime();
+      const now = Date.now();
+      const diff = Math.floor((now - eventTime) / 1000); // seconds ago
 
-  // Connection status indicator
-  const connectionStatus = isChecking ? (
-    <>
-      <Loader className="h-2 w-2 animate-spin" />
-      <span className="text-sm text-gray-400">Connecting...</span>
-    </>
-  ) : isConnected ? (
-    <>
-      <div className="h-2 w-2 rounded-full bg-green-500"></div>
-      <span className="text-sm text-gray-400">Connected</span>
-    </>
-  ) : (
-    <>
-      <div className="h-2 w-2 rounded-full bg-red-500"></div>
-      <span className="text-sm text-gray-400">Disconnected</span>
-    </>
-  );
+      if (diff < 60) return `${diff}s ago`;
+      if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+      if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+      return `${Math.floor(diff / 86400)}d ago`;
+    } catch (e) {
+      return timestamp; // Return original if parsing fails
+    }
+  };
 
-  // Format timestamp for display
-  const formatTimeAgo = (timestamp: number) => {
-    const now = Date.now();
-    const diff = Math.floor((now - timestamp) / 1000); // seconds ago
-    
-    if (diff < 60) return `${diff}s ago`;
-    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-    if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
-    return `${Math.floor(diff / 86400)}d ago`;
+  /**
+   * TRUNCATE ADDRESS
+   *
+   * Shortens long addresses/chain IDs for display
+   * Example: "04022f7a91f28...4c1ecaa99"
+   */
+  const truncateAddress = (address: string, start = 8, end = 8) => {
+    if (address.length <= start + end) return address;
+    return `${address.substring(0, start)}...${address.substring(address.length - end)}`;
   };
 
   return (
-    <div className="min-h-screen bg-gray-900 text-gray-100">
-      <header className="border-b border-gray-800 bg-gray-900/50 backdrop-blur-sm">
-        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <div className="flex h-16 items-center justify-between">
-            <div className="flex items-center">
-              <Zap className="h-8 w-8 text-blue-500" />
-              <span className="ml-2 text-xl font-bold">Fluxera</span>
-              <span className="ml-2 text-sm text-gray-400">Dashboard</span>
-            </div>
-            <div className="flex items-center space-x-4">
-              <div className="flex items-center space-x-1">
-                {connectionStatus}
-              </div>
+    <>
+      {/* TOP NAVBAR */}
+      <Navbar />
+
+      {/* SIDEBAR */}
+      <Sidebar currentPage="dashboard" />
+
+      {/* MAIN CONTENT - FULL WIDTH */}
+      <main className="ml-64 mt-16 min-h-screen bg-gray-900 text-gray-100 p-6">
+        {/* ERROR MESSAGE */}
+        {summaryError && (
+          <div className="mb-6 flex items-center space-x-2 rounded-lg bg-red-900/20 border border-red-500/30 p-4 text-red-400">
+            <AlertCircle className="h-5 w-5" />
+            <div>
+              <p className="font-semibold">Unable to connect to Fluxera</p>
+              <p className="text-sm">Make sure Linera service is running: <code className="text-xs bg-gray-800 px-1 py-0.5 rounded">linera service --port 8080</code></p>
             </div>
           </div>
-        </div>
-      </header>
+        )}
 
-      <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
-        <div className="mb-6">
-          <h1 className="text-3xl font-bold">Linera Microchain Monitor</h1>
-          <p className="text-gray-400">Real-time indexing and analytics for your microchain ecosystem</p>
-          {!isConnected && !isChecking && (
-            <div className="mt-2 flex items-center space-x-2 text-red-400">
-              <AlertCircle className="h-4 w-4" />
-              <span className="text-sm">Unable to connect to Fluxera indexer. Make sure it's running on port 3001.</span>
-            </div>
-          )}
-        </div>
-
+        {/* STATS CARDS */}
         <div className="mb-6 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
           {/* Total Events Card */}
-          <div className="rounded-lg bg-gray-800 p-6">
-            <div className="flex items-center">
-              <Database className="h-8 w-8 text-blue-500" />
-              <div className="ml-4">
-                <p className="text-sm font-medium text-gray-400">Total Events</p>
-                {statsLoading ? (
-                  <div className="flex items-center space-x-2">
-                    <Loader className="h-4 w-4 animate-spin" />
+          <div className="rounded-lg bg-gradient-to-br from-blue-900/40 to-blue-900/20 border border-blue-500/30 p-6 hover:scale-105 transition-transform">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-blue-300">Total Events</p>
+                {summaryLoading ? (
+                  <div className="flex items-center space-x-2 mt-2">
+                    <Loader className="h-4 w-4 animate-spin text-blue-400" />
                     <span className="text-lg text-gray-400">Loading...</span>
                   </div>
-                ) : statsError ? (
-                  <p className="text-lg text-red-400">Error</p>
                 ) : (
-                  <p className="text-2xl font-bold">{statsData?.total_events?.toLocaleString() || '0'}</p>
+                  <p className="text-3xl font-bold mt-1">{summary?.totalEvents?.toLocaleString() || '0'}</p>
                 )}
+                <div className="flex items-center space-x-1 mt-1">
+                  <TrendingUp className="h-3 w-3 text-green-400" />
+                  <span className="text-xs text-green-400">On-chain verified</span>
+                </div>
               </div>
+              <Database className="h-12 w-12 text-blue-500/50" />
             </div>
           </div>
 
-          {/* Active Microchains Card */}
-          <div className="rounded-lg bg-gray-800 p-6">
-            <div className="flex items-center">
-              <Globe className="h-8 w-8 text-green-500" />
-              <div className="ml-4">
-                <p className="text-sm font-medium text-gray-400">Active Microchains</p>
-                {statsLoading ? (
-                  <div className="flex items-center space-x-2">
-                    <Loader className="h-4 w-4 animate-spin" />
+          {/* Unique Users Card */}
+          <div className="rounded-lg bg-gradient-to-br from-green-900/40 to-green-900/20 border border-green-500/30 p-6 hover:scale-105 transition-transform">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-green-300">Unique Users</p>
+                {summaryLoading ? (
+                  <div className="flex items-center space-x-2 mt-2">
+                    <Loader className="h-4 w-4 animate-spin text-green-400" />
                     <span className="text-lg text-gray-400">Loading...</span>
                   </div>
-                ) : statsError ? (
-                  <p className="text-lg text-red-400">Error</p>
                 ) : (
-                  <p className="text-2xl font-bold">{statsData?.unique_microchains || '0'}</p>
+                  <p className="text-3xl font-bold mt-1">{summary?.uniqueUsers?.toLocaleString() || '0'}</p>
                 )}
+                <div className="flex items-center space-x-1 mt-1">
+                  <Activity className="h-3 w-3 text-green-400" />
+                  <span className="text-xs text-green-400">Active addresses</span>
+                </div>
               </div>
+              <Globe className="h-12 w-12 text-green-500/50" />
             </div>
           </div>
 
-          {/* Database Status Card */}
-          <div className="rounded-lg bg-gray-800 p-6">
-            <div className="flex items-center">
-              <Activity className="h-8 w-8 text-yellow-500" />
-              <div className="ml-4">
-                <p className="text-sm font-medium text-gray-400">Database</p>
-                {healthLoading ? (
-                  <div className="flex items-center space-x-2">
-                    <Loader className="h-4 w-4 animate-spin" />
-                    <span className="text-lg text-gray-400">Checking...</span>
+          {/* Cross-Chain Messages Card */}
+          <div className="rounded-lg bg-gradient-to-br from-purple-900/40 to-purple-900/20 border border-purple-500/30 p-6 hover:scale-105 transition-transform">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-purple-300">Cross-Chain Messages</p>
+                {summaryLoading ? (
+                  <div className="flex items-center space-x-2 mt-2">
+                    <Loader className="h-4 w-4 animate-spin text-purple-400" />
+                    <span className="text-lg text-gray-400">Loading...</span>
                   </div>
-                ) : healthError ? (
-                  <p className="text-lg text-red-400">Error</p>
                 ) : (
-                  <p className="text-2xl font-bold capitalize">{healthData?.database || 'Unknown'}</p>
+                  <p className="text-3xl font-bold mt-1">{summary?.totalMessages?.toLocaleString() || '0'}</p>
                 )}
+                <div className="flex items-center space-x-1 mt-1">
+                  <Zap className="h-3 w-3 text-purple-400" />
+                  <span className="text-xs text-purple-400">Linera messaging</span>
+                </div>
               </div>
+              <Activity className="h-12 w-12 text-purple-500/50" />
             </div>
           </div>
 
-          {/* Latest Block Card */}
-          <div className="rounded-lg bg-gray-800 p-6">
-            <div className="flex items-center">
-              <Zap className="h-8 w-8 text-purple-500" />
-              <div className="ml-4">
-                <p className="text-sm font-medium text-gray-400">Latest Block</p>
-                {statsLoading ? (
-                  <div className="flex items-center space-x-2">
-                    <Loader className="h-4 w-4 animate-spin" />
+          {/* Active Chains Card */}
+          <div className="rounded-lg bg-gradient-to-br from-yellow-900/40 to-yellow-900/20 border border-yellow-500/30 p-6 hover:scale-105 transition-transform">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-yellow-300">Active Chains</p>
+                {chainsLoading ? (
+                  <div className="flex items-center space-x-2 mt-2">
+                    <Loader className="h-4 w-4 animate-spin text-yellow-400" />
                     <span className="text-lg text-gray-400">Loading...</span>
                   </div>
-                ) : statsError ? (
-                  <p className="text-lg text-red-400">Error</p>
                 ) : (
-                  <p className="text-2xl font-bold">
-                    {statsData?.latest_block_height ? `#${statsData.latest_block_height}` : 'None'}
-                  </p>
+                  <p className="text-3xl font-bold mt-1">{chains?.length || '1'}</p>
                 )}
+                <div className="flex items-center space-x-1 mt-1">
+                  <Globe className="h-3 w-3 text-yellow-400" />
+                  <span className="text-xs text-yellow-400">Microchains</span>
+                </div>
               </div>
+              <Zap className="h-12 w-12 text-yellow-500/50" />
             </div>
           </div>
         </div>
 
+        {/* INTERACTIVE FORMS SECTION */}
+        <div className="mb-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
+          {/* Event Tracking Form */}
+          <EventTrackingForm />
+
+          {/* Cross-Chain Message Form */}
+          <CrossChainMessageForm />
+        </div>
+
+        {/* EVENTS TABLE WITH FILTERING */}
+        <div className="mb-6">
+          <EventsTable />
+        </div>
+
+        {/* RECENT EVENTS SECTION */}
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-          <div className="rounded-lg bg-gray-800 p-6">
-            <h3 className="mb-4 text-lg font-semibold">Recent Events</h3>
+          <div className="rounded-lg bg-gray-800 border border-gray-700 p-6">
+            <h3 className="mb-4 text-lg font-semibold flex items-center">
+              <Activity className="h-5 w-5 mr-2 text-blue-400" />
+              Recent Events
+            </h3>
             <div className="space-y-3">
               {eventsLoading ? (
                 <div className="flex items-center justify-center py-8">
-                  <Loader className="h-6 w-6 animate-spin" />
-                  <span className="ml-2 text-gray-400">Loading events...</span>
+                  <Loader className="h-6 w-6 animate-spin text-blue-400" />
+                  <span className="ml-2 text-gray-400">Loading events from blockchain...</span>
                 </div>
               ) : eventsError ? (
                 <div className="flex items-center justify-center py-8 text-red-400">
                   <AlertCircle className="h-6 w-6" />
                   <span className="ml-2">Failed to load events</span>
                 </div>
-              ) : !recentEvents || recentEvents.length === 0 ? (
-                <div className="flex items-center justify-center py-8 text-gray-400">
-                  <Database className="h-6 w-6" />
-                  <span className="ml-2">No events yet - indexer is waiting for blockchain activity</span>
+              ) : !events || events.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-8 text-gray-400">
+                  <Database className="h-12 w-12 mb-2 opacity-50" />
+                  <p className="text-sm">No events tracked yet</p>
+                  <p className="text-xs mt-1">Track your first event to see it here!</p>
                 </div>
               ) : (
-                recentEvents.slice(0, 4).map((event) => (
-                  <div key={event.id} className="flex items-center justify-between rounded-lg bg-gray-700/50 p-3">
-                    <div className="flex items-center space-x-3">
-                      <div className="h-2 w-2 rounded-full bg-blue-500"></div>
-                      <div>
-                        <p className="text-sm font-medium">{event.event_type}</p>
-                        <p className="text-xs text-gray-400 font-mono">
-                          Chain: {event.microchain_id.substring(0, 8)}...{event.microchain_id.substring(event.microchain_id.length - 4)}
-                        </p>
+                events.map((event) => {
+                  if (!event) return null;
+                  return (
+                    <div
+                      key={event.eventId}
+                      className="flex items-center justify-between rounded-lg bg-gray-700/50 border border-gray-600/50 p-4 hover:bg-gray-700 transition-colors"
+                    >
+                      <div className="flex items-center space-x-3">
+                        <div className="h-2 w-2 rounded-full bg-blue-500 animate-pulse"></div>
+                        <div>
+                          <p className="text-sm font-medium text-blue-300">{event.eventType}</p>
+                          <p className="text-xs text-gray-400 font-mono">
+                            Owner: {truncateAddress(event.owner || '', 6, 4)}
+                          </p>
+                          {event.data && event.data !== '{}' && (
+                            <p className="text-xs text-gray-500 mt-1">
+                              Data: {event.data.length > 50 ? event.data.substring(0, 50) + '...' : event.data}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-xs text-gray-400">{formatTimeAgo(event.timestamp || '')}</p>
+                        <p className="text-xs text-gray-500 font-mono">ID: {event.eventId?.split('-')[1]}</p>
                       </div>
                     </div>
-                    <div className="text-right">
-                      <p className="text-xs text-gray-400">{formatTimeAgo(event.timestamp)}</p>
-                      <p className="text-xs text-gray-500">#{event.block_height}</p>
-                    </div>
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
           </div>
 
-          <div className="rounded-lg bg-gray-800 p-6">
-            <h3 className="mb-4 text-lg font-semibold">System Status</h3>
+          {/* SYSTEM INFO SECTION */}
+          <div className="rounded-lg bg-gray-800 border border-gray-700 p-6">
+            <h3 className="mb-4 text-lg font-semibold flex items-center">
+              <Zap className="h-5 w-5 mr-2 text-yellow-400" />
+              System Information
+            </h3>
             <div className="space-y-3">
-              {/* Connection Status */}
-              <div className="flex items-center justify-between rounded-lg bg-gray-700/50 p-3">
+              {/* Fluxera Application */}
+              <div className="flex items-center justify-between rounded-lg bg-gray-700/50 border border-gray-600/50 p-3">
                 <div className="flex items-center space-x-3">
-                  <div className={`h-2 w-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`}></div>
+                  <div className={`h-2 w-2 rounded-full ${summaryError ? 'bg-red-500' : 'bg-green-500 animate-pulse'}`}></div>
                   <div>
-                    <p className="text-sm font-medium">Fluxera Indexer</p>
-                    <p className="text-xs text-gray-400">REST API Connection</p>
+                    <p className="text-sm font-medium">Fluxera WASM App</p>
+                    <p className="text-xs text-gray-400">Linera WebAssembly</p>
                   </div>
                 </div>
                 <div className="text-right">
-                  <p className="text-xs text-gray-400">{isConnected ? 'Connected' : 'Disconnected'}</p>
-                  <p className="text-xs text-gray-500">Port 3001</p>
+                  <p className="text-xs text-gray-400">{summaryError ? 'Error' : 'Connected'}</p>
+                  <p className="text-xs text-gray-500">GraphQL</p>
                 </div>
               </div>
 
-              {/* Database Status */}
-              <div className="flex items-center justify-between rounded-lg bg-gray-700/50 p-3">
+              {/* Chain Information */}
+              <div className="flex items-center justify-between rounded-lg bg-gray-700/50 border border-gray-600/50 p-3">
                 <div className="flex items-center space-x-3">
-                  <div className={`h-2 w-2 rounded-full ${healthData?.database === 'connected' ? 'bg-green-500' : 'bg-yellow-500'}`}></div>
+                  <div className="h-2 w-2 rounded-full bg-blue-500"></div>
                   <div>
-                    <p className="text-sm font-medium">Database</p>
-                    <p className="text-xs text-gray-400">SQLite Storage</p>
+                    <p className="text-sm font-medium">Chain ID</p>
+                    <p className="text-xs text-gray-400 font-mono">{truncateAddress(summary?.chainId || FLUXERA_CONFIG.CHAIN_ID, 12, 8)}</p>
                   </div>
                 </div>
                 <div className="text-right">
-                  <p className="text-xs text-gray-400 capitalize">{healthData?.database || 'Unknown'}</p>
-                  <p className="text-xs text-gray-500">Local</p>
+                  <p className="text-xs text-gray-400">Active</p>
+                  <p className="text-xs text-gray-500">Microchain</p>
                 </div>
               </div>
 
-              {/* Linera Service Status */}
-              <div className="flex items-center justify-between rounded-lg bg-gray-700/50 p-3">
+              {/* Application ID */}
+              <div className="flex items-center justify-between rounded-lg bg-gray-700/50 border border-gray-600/50 p-3">
                 <div className="flex items-center space-x-3">
-                  <div className={`h-2 w-2 rounded-full ${healthData?.status === 'healthy' ? 'bg-green-500' : 'bg-yellow-500'}`}></div>
+                  <div className="h-2 w-2 rounded-full bg-purple-500"></div>
                   <div>
-                    <p className="text-sm font-medium">Linera GraphQL</p>
-                    <p className="text-xs text-gray-400">Blockchain Service</p>
+                    <p className="text-sm font-medium">Application ID</p>
+                    <p className="text-xs text-gray-400 font-mono">{truncateAddress(FLUXERA_CONFIG.APP_ID, 12, 8)}</p>
                   </div>
                 </div>
                 <div className="text-right">
-                  <p className="text-xs text-gray-400 capitalize">{healthData?.status || 'Unknown'}</p>
+                  <p className="text-xs text-gray-400">Deployed</p>
+                  <p className="text-xs text-gray-500">Fluxera</p>
+                </div>
+              </div>
+
+              {/* GraphQL Endpoint */}
+              <div className="flex items-center justify-between rounded-lg bg-gray-700/50 border border-gray-600/50 p-3">
+                <div className="flex items-center space-x-3">
+                  <div className="h-2 w-2 rounded-full bg-green-500"></div>
+                  <div>
+                    <p className="text-sm font-medium">GraphQL Endpoint</p>
+                    <p className="text-xs text-gray-400">{FLUXERA_CONFIG.GRAPHQL_ENDPOINT}</p>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <p className="text-xs text-gray-400">Local</p>
                   <p className="text-xs text-gray-500">Port 8080</p>
                 </div>
               </div>
 
-              {/* Event Processing Status */}
-              <div className="flex items-center justify-between rounded-lg bg-gray-700/50 p-3">
+              {/* Auto-Refresh Info */}
+              <div className="flex items-center justify-between rounded-lg bg-blue-900/20 border border-blue-500/30 p-3">
                 <div className="flex items-center space-x-3">
-                  <div className={`h-2 w-2 rounded-full ${(statsData?.total_events || 0) > 0 ? 'bg-green-500' : 'bg-gray-500'}`}></div>
+                  <Activity className="h-4 w-4 text-blue-400 animate-spin" />
                   <div>
-                    <p className="text-sm font-medium">Event Processing</p>
-                    <p className="text-xs text-gray-400">Blockchain Indexing</p>
+                    <p className="text-sm font-medium text-blue-300">Auto-Refresh</p>
+                    <p className="text-xs text-blue-400">Real-time polling active</p>
                   </div>
                 </div>
                 <div className="text-right">
-                  <p className="text-xs text-gray-400">
-                    {(statsData?.total_events || 0) > 0 ? 'Active' : 'Waiting for events'}
-                  </p>
-                  <p className="text-xs text-gray-500">{statsData?.total_events || 0} total</p>
-                </div>
-              </div>
-
-              {/* WebSocket Real-Time Stream Status */}
-              <div className="flex items-center justify-between rounded-lg bg-gray-700/50 p-3 border border-blue-500/20">
-                <div className="flex items-center space-x-3">
-                  <div className={`h-2 w-2 rounded-full ${
-                    wsStatus === WebSocketStatus.CONNECTED ? 'bg-green-500 animate-pulse' :
-                    wsStatus === WebSocketStatus.CONNECTING || wsStatus === WebSocketStatus.RECONNECTING ? 'bg-yellow-500 animate-pulse' :
-                    wsStatus === WebSocketStatus.ERROR ? 'bg-red-500' :
-                    'bg-gray-500'
-                  }`}></div>
-                  <div>
-                    <p className="text-sm font-medium">WebSocket Stream</p>
-                    <p className="text-xs text-gray-400">Real-Time Events</p>
-                  </div>
-                </div>
-                <div className="text-right">
-                  <p className="text-xs text-gray-400 capitalize">
-                    {wsStatus === WebSocketStatus.RECONNECTING ? `Reconnecting (${reconnectAttempts})` : wsStatus}
-                  </p>
-                  <p className="text-xs text-gray-500">{wsEventCount} received</p>
+                  <p className="text-xs text-blue-400">5s interval</p>
+                  <p className="text-xs text-blue-500">Live data</p>
                 </div>
               </div>
             </div>
           </div>
         </div>
 
-        {/* Real-Time Events Section - Only shown if WebSocket has events */}
-        {wsEvents.length > 0 && (
-          <div className="mt-6 rounded-lg bg-gradient-to-r from-blue-900/20 to-purple-900/20 p-6 border border-blue-500/30">
-            <h3 className="mb-4 text-lg font-semibold flex items-center">
-              <Zap className="h-5 w-5 mr-2 text-blue-400 animate-pulse" />
-              Live Event Stream
-              <span className="ml-2 text-xs px-2 py-1 rounded bg-blue-500/20 text-blue-300">REAL-TIME</span>
-            </h3>
-            <div className="space-y-3">
-              {wsEvents.slice(0, 5).map((event) => (
-                <div key={event.id} className="flex items-center justify-between rounded-lg bg-gray-800/50 p-3 border-l-2 border-blue-500">
-                  <div className="flex items-center space-x-3">
-                    <div className="h-2 w-2 rounded-full bg-blue-500 animate-pulse"></div>
-                    <div>
-                      <p className="text-sm font-medium text-blue-300">{event.event_type}</p>
-                      <p className="text-xs text-gray-400 font-mono">
-                        Chain: {event.microchain_id.substring(0, 8)}...{event.microchain_id.substring(event.microchain_id.length - 4)}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-xs text-gray-400">{formatTimeAgo(event.timestamp)}</p>
-                    <p className="text-xs text-gray-500">#{event.block_height}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-            {latestEvent && (
-              <div className="mt-4 pt-4 border-t border-gray-700">
-                <p className="text-xs text-gray-400">
-                  Latest: <span className="text-blue-400 font-mono">{latestEvent.id.substring(0, 16)}...</span>
-                  <span className="ml-2">received {formatTimeAgo(latestEvent.timestamp)}</span>
-                </p>
-              </div>
-            )}
-          </div>
-        )}
+        {/* FOOTER INFO */}
+        <div className="mt-6 text-center text-sm text-gray-500">
+          <p>
+            Powered by Fluxera • Running on Linera Protocol •
+            <a href="https://linera.io" target="_blank" rel="noopener noreferrer" className="ml-1 text-blue-400 hover:text-blue-300">
+              Learn more →
+            </a>
+          </p>
+        </div>
       </main>
-    </div>
+    </>
   );
 }
