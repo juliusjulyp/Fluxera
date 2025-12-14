@@ -1,12 +1,12 @@
 /**
  * CROSS-CHAIN MESSAGE FORM
  *
- * Interactive form for sending messages between Linera chains
+ * Interactive form for sending messages between Linera chains.
+ * Requires wallet connection to submit messages.
  *
- * WHAT THIS DEMONSTRATES:
- * - Linera's cross-chain messaging capability
- * - Asynchronous message passing between microchains
- * - Fluxera's cross-chain analytics synchronization
+ * DUAL-MODE:
+ * - Without wallet: Shows form but prompts to connect
+ * - With wallet: Full functionality to send cross-chain messages
  *
  * USE CASES:
  * - Sync analytics data between chains
@@ -14,26 +14,63 @@
  * - Coordinate multi-chain workflows
  *
  * DATA FLOW:
- * User Input → Form Submit → useSendCrossChainMessage hook →
- * GraphQL Mutation → Fluxera contract.rs send_cross_chain_message() →
- * Linera runtime.prepare_message().send_to() →
- * Message stored on source chain → Message delivered to target chain
+ * User Input → Form Submit → useSendMessage hook →
+ * LineraProvider → Fluxera WASM contract → Linera runtime →
+ * Message queued → Delivered to target chain
  */
 
 'use client';
 
 import { useState } from 'react';
-import { useSendCrossChainMessage } from '@/hooks/useFluxera';
+import { Wallet, Loader2, CheckCircle, AlertCircle, MessageSquare } from 'lucide-react';
+import { useSendMessage, useWallet } from '@/components/providers/LineraProvider';
 
 export default function CrossChainMessageForm() {
   const [targetChain, setTargetChain] = useState('');
   const [messageType, setMessageType] = useState('');
+  const [isCustomType, setIsCustomType] = useState(false);
   const [payload, setPayload] = useState('');
   const [showSuccess, setShowSuccess] = useState(false);
   const [messageId, setMessageId] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  // Get the mutation hook
-  const [sendMessage, { loading, error }] = useSendCrossChainMessage();
+  // Get wallet state and send message function
+  const { isConnected, chainId: myChainId } = useWallet();
+  const { sendMessage } = useSendMessage();
+
+  /**
+   * Normalize chain ID - strip 0x prefix if present
+   */
+  const normalizeChainId = (chainId: string): string => {
+    let normalized = chainId.trim();
+    // Strip 0x or 0X prefix if present
+    if (normalized.toLowerCase().startsWith('0x')) {
+      normalized = normalized.slice(2);
+    }
+    return normalized;
+  };
+
+  /**
+   * Validate chain ID format (64 hex characters)
+   */
+  const isValidChainId = (chainId: string): boolean => {
+    const normalized = normalizeChainId(chainId);
+    return /^[a-fA-F0-9]{64}$/.test(normalized);
+  };
+
+  /**
+   * Handle chain ID input with auto-normalization
+   */
+  const handleChainIdChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setTargetChain(value);
+
+    // Clear error if user is typing
+    if (error?.includes('chain ID')) {
+      setError(null);
+    }
+  };
 
   /**
    * Handle form submission
@@ -41,35 +78,41 @@ export default function CrossChainMessageForm() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
+    if (!isConnected) {
+      setError('Please connect your wallet first');
+      return;
+    }
+
+    // Normalize and validate chain ID
+    const normalizedChainId = normalizeChainId(targetChain);
+    if (!isValidChainId(targetChain)) {
+      setError('Invalid chain ID format. Must be 64 hex characters (without 0x prefix).');
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+
     try {
-      // Call the GraphQL mutation
-      const result = await sendMessage({
-        variables: {
-          targetChain: targetChain,
-          messageType: messageType,
-          payload: payload,
-        },
-      });
+      const result = await sendMessage(normalizedChainId, messageType, payload);
 
-      // Parse JSON response
-      const response = JSON.parse((result.data as any)?.sendCrossChainMessage || '{}');
-
-      console.log('Message sent successfully:', response);
-
-      // Show success notification
-      setMessageId(response.message_id || 'N/A');
-      setShowSuccess(true);
-
-      // Reset form
-      setTargetChain('');
-      setMessageType('');
-      setPayload('');
-
-      // Hide success message after 5 seconds
-      setTimeout(() => setShowSuccess(false), 5000);
-
+      if (result.success) {
+        console.log('Message sent successfully:', result);
+        setMessageId(result.messageId || 'N/A');
+        setShowSuccess(true);
+        setTargetChain('');
+        setMessageType('');
+        setIsCustomType(false);
+        setPayload('');
+        setTimeout(() => setShowSuccess(false), 5000);
+      } else {
+        setError(result.error || 'Failed to send message');
+      }
     } catch (err) {
       console.error('Failed to send message:', err);
+      setError(err instanceof Error ? err.message : 'Unknown error');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -86,24 +129,40 @@ export default function CrossChainMessageForm() {
   return (
     <div className="bg-gray-800/50 backdrop-blur-sm border border-gray-700 rounded-lg p-6">
       <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
-        <span className="text-2xl">✉️</span>
+        <MessageSquare className="h-6 w-6 text-purple-400" />
         Send Cross-Chain Message
       </h2>
 
+      {/* Wallet not connected prompt */}
+      {!isConnected && (
+        <div className="mb-4 p-4 bg-yellow-500/10 border border-yellow-500/30 rounded-lg flex items-center space-x-3">
+          <Wallet className="h-5 w-5 text-yellow-400 flex-shrink-0" />
+          <div>
+            <p className="text-yellow-300 font-medium text-sm">Wallet Required</p>
+            <p className="text-yellow-400/70 text-xs">Connect your wallet to send cross-chain messages</p>
+          </div>
+        </div>
+      )}
+
       {/* Success notification */}
       {showSuccess && (
-        <div className="mb-4 p-4 bg-green-500/20 border border-green-500 rounded-lg">
-          <p className="text-green-400 font-semibold">✅ Message sent successfully!</p>
-          <p className="text-green-300 text-sm mt-1">Message ID: {messageId}</p>
-          <p className="text-green-300 text-sm">Target: {targetChain.slice(0, 16)}...</p>
+        <div className="mb-4 p-4 bg-green-500/20 border border-green-500 rounded-lg flex items-start space-x-3">
+          <CheckCircle className="h-5 w-5 text-green-400 flex-shrink-0 mt-0.5" />
+          <div>
+            <p className="text-green-400 font-semibold">Message sent successfully!</p>
+            <p className="text-green-300 text-sm mt-1">Message ID: {messageId}</p>
+          </div>
         </div>
       )}
 
       {/* Error notification */}
       {error && (
-        <div className="mb-4 p-4 bg-red-500/20 border border-red-500 rounded-lg">
-          <p className="text-red-400 font-semibold">❌ Error sending message</p>
-          <p className="text-red-300 text-sm mt-1">{error.message}</p>
+        <div className="mb-4 p-4 bg-red-500/20 border border-red-500 rounded-lg flex items-start space-x-3">
+          <AlertCircle className="h-5 w-5 text-red-400 flex-shrink-0 mt-0.5" />
+          <div>
+            <p className="text-red-400 font-semibold">Error sending message</p>
+            <p className="text-red-300 text-sm mt-1">{error}</p>
+          </div>
         </div>
       )}
 
@@ -117,14 +176,37 @@ export default function CrossChainMessageForm() {
             id="targetChain"
             type="text"
             value={targetChain}
-            onChange={(e) => setTargetChain(e.target.value)}
-            placeholder="e.g., 04022f7a91f2800b7eb437ab4baa1d8e010854739bbdf64d605705f4c1ecaa99"
+            onChange={handleChainIdChange}
+            placeholder="e476187f6ddfeb9d588c7b45d3df334d5501d6499b3f9ad5595cae86cce16a65"
             required
-            className="w-full px-4 py-2 bg-gray-900/50 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500 font-mono text-sm"
+            disabled={!isConnected}
+            className={`w-full px-4 py-2 bg-gray-900/50 border rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500 font-mono text-sm disabled:opacity-50 disabled:cursor-not-allowed ${
+              targetChain && !isValidChainId(targetChain)
+                ? 'border-yellow-500'
+                : 'border-gray-600'
+            }`}
           />
-          <p className="text-gray-500 text-xs mt-1">
-            💡 Enter the full chain ID of the destination chain
-          </p>
+          <div className="flex items-center justify-between mt-1">
+            <div className="flex items-start gap-2">
+              <p className="text-gray-500 text-xs">
+                Raw hex (64 chars). No "0x" prefix.
+              </p>
+              {targetChain && targetChain.toLowerCase().startsWith('0x') && (
+                <span className="text-yellow-400 text-xs">
+                  (0x will be auto-removed)
+                </span>
+              )}
+            </div>
+            {isConnected && myChainId && (
+              <button
+                type="button"
+                onClick={() => setTargetChain(myChainId)}
+                className="text-xs text-purple-400 hover:text-purple-300 underline"
+              >
+                Use my chain (for testing)
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Message Type Selection */}
@@ -137,9 +219,18 @@ export default function CrossChainMessageForm() {
               <button
                 key={type.type}
                 type="button"
-                onClick={() => setMessageType(type.type)}
-                className={`p-3 rounded-lg border transition-all ${
-                  messageType === type.type
+                onClick={() => {
+                  if (type.type === 'custom') {
+                    setIsCustomType(true);
+                    setMessageType('');
+                  } else {
+                    setIsCustomType(false);
+                    setMessageType(type.type);
+                  }
+                }}
+                disabled={!isConnected}
+                className={`p-3 rounded-lg border transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
+                  (type.type === 'custom' && isCustomType) || (!isCustomType && messageType === type.type)
                     ? 'bg-purple-600/30 border-purple-500 text-purple-200'
                     : 'bg-gray-700/50 border-gray-600 text-gray-300 hover:bg-gray-700'
                 }`}
@@ -151,15 +242,19 @@ export default function CrossChainMessageForm() {
           </div>
         </div>
 
-        {/* Custom message type input if "custom" selected */}
-        {messageType === 'custom' && (
+        {/* Custom message type input */}
+        {isCustomType && (
           <div>
+            <label className="block text-gray-300 text-sm font-medium mb-2">
+              Custom Message Type
+            </label>
             <input
               type="text"
-              value={messageType === 'custom' ? '' : messageType}
+              value={messageType}
               onChange={(e) => setMessageType(e.target.value)}
-              placeholder="Enter custom message type"
-              className="w-full px-4 py-2 bg-gray-900/50 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500"
+              placeholder="Enter custom message type (e.g., my_custom_event)"
+              disabled={!isConnected}
+              className="w-full px-4 py-2 bg-gray-900/50 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500 disabled:opacity-50 disabled:cursor-not-allowed"
             />
           </div>
         )}
@@ -175,24 +270,28 @@ export default function CrossChainMessageForm() {
             onChange={(e) => setPayload(e.target.value)}
             placeholder='{"data": "your message here", "timestamp": "2024-01-15"}'
             rows={4}
-            className="w-full px-4 py-2 bg-gray-900/50 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500 font-mono text-sm"
+            required
+            disabled={!isConnected}
+            className="w-full px-4 py-2 bg-gray-900/50 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500 font-mono text-sm disabled:opacity-50 disabled:cursor-not-allowed"
           />
         </div>
 
         {/* Submit Button */}
         <button
           type="submit"
-          disabled={loading || !targetChain || !messageType || !payload}
-          className="w-full px-6 py-3 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 disabled:from-gray-600 disabled:to-gray-600 text-white font-semibold rounded-lg transition-all duration-200 disabled:cursor-not-allowed"
+          disabled={loading || !targetChain || !messageType || !payload || !isConnected}
+          className="w-full px-6 py-3 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 disabled:from-gray-600 disabled:to-gray-600 text-white font-semibold rounded-lg transition-all duration-200 disabled:cursor-not-allowed flex items-center justify-center gap-2"
         >
           {loading ? (
-            <span className="flex items-center justify-center gap-2">
-              <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-              </svg>
-              Sending Message...
-            </span>
+            <>
+              <Loader2 className="h-5 w-5 animate-spin" />
+              <span>Sending Message...</span>
+            </>
+          ) : !isConnected ? (
+            <>
+              <Wallet className="h-5 w-5" />
+              <span>Connect Wallet to Send</span>
+            </>
           ) : (
             <span>🚀 Send Cross-Chain Message</span>
           )}

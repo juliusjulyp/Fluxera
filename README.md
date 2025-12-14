@@ -336,51 +336,45 @@ query-engine/
 - 50% improvement in query performance with caching
 - Geographic latency tracking across all supported regions
 
-### 🌊 Wave 4 — Developer Experience & SDKs
-**Goal:** Make integration easy with SDKs and developer tools.
+### 🌊 Wave 4 — Wallet Integration & Cross-Chain UI
+**Status: COMPLETED**
+
+**Goal:** Full wallet integration and cross-chain interaction UI.
+
+**Deliverables:**
+- ✅ Multi-wallet support (CheCko, Croissant, Session)
+- ✅ Session wallet via Conway testnet faucet
+- ✅ Cross-chain message form with chain ID validation
+- ✅ Event tracking form for custom on-chain events
+- ✅ Authenticated queries through WASM client
+- ✅ React hooks library (13+ hooks in `useFluxera.ts`)
+- ✅ LineraProvider context for wallet state management
+
+### 🌊 Wave 5 — Production Deployment & Testnet Polish
+**Goal:** Deploy to production and resolve testnet integration issues.
 
 **Core Deliverables:**
-- **TypeScript SDK** - Easy frontend integration
-- **Rust client library** - Native Rust applications
-- **Cross-microchain analytics dashboard** - Unified view of user's microchain ecosystem with activity flows and resource usage
-- **Developer documentation** - Comprehensive guides and examples
-- **API versioning** - Stable API contracts for production use
-- **Enhanced developer dashboard** - Web UI for exploring indexed data with microchain-specific insights
+- ⏳ **CORS Resolution** - Work with Linera team on validator CORS headers
+- ⏳ **Production Frontend** - Deploy to Vercel/Netlify
+- ⏳ **Persistent Wallet Storage** - Remember wallet sessions across page reloads
+- ⏳ **Enhanced Error UX** - Better error messages and recovery flows
+- ⏳ **Mobile Responsiveness** - Optimize dashboard for mobile devices
+- ⏳ **Documentation** - API docs and integration guides
 
-**SDK Features:**
-```
-sdk/
-├── typescript/       // Web/Node.js client
-├── rust/            // Native Rust client
-├── analytics/       // Cross-microchain analytics components
-└── examples/        // Integration examples
-```
+**Known Issues to Address:**
+- Conway validators lack CORS headers for browser WASM requests
+- Session wallets are ephemeral (lost on page refresh)
 
-**Success Metrics:**
-- TypeScript SDK adoption in 5+ projects
-- Comprehensive API documentation
-- Cross-microchain analytics dashboard with user-centric views
-- Developer dashboard adoption by 80% of active developers
-
-### 🌊 Wave 5 — Production Infrastructure & Reliability
-**Goal:** Production-ready deployment with monitoring, high availability, and ecosystem integration.
+### 🌊 Wave 6 — Advanced Analytics & Ecosystem
+**Goal:** Advanced features and ecosystem integration.
 
 **Core Deliverables:**
-- **High availability** - Multi-instance deployment with load balancing
-- **Comprehensive monitoring** - Prometheus metrics and Grafana dashboards
-- **Automated deployment** - Docker containers and CI/CD pipelines
-- **Error handling & recovery** - Robust failure scenarios and auto-recovery
-- **Ecosystem integration** - Compatibility with Linera tooling and services
-
-**Infrastructure:**
-- **Monitoring:** Prometheus + Grafana for observability
-- **Deployment:** Docker + Kubernetes for scaling
-- **CI/CD:** GitHub Actions for automated testing and deployment
-
-**Success Metrics:**
-- 99.5% uptime with automated failover
-- Handle 1,000+ microchains with <1s query latency
-- Production adoption by Linera ecosystem projects
+- ⏳ **Network Topology Visualizer** - Graph view of microchain connections
+- ⏳ **Historical Analytics** - Time-range queries and trend analysis
+- ⏳ **Alerts & Notifications** - Custom event alerts via webhook/email
+- ⏳ **API Playground** - Interactive GraphQL explorer
+- ⏳ **Multi-chain Dashboard** - Aggregate view across all user's chains
+- ⏳ **Performance Monitoring** - Chain health scores and latency tracking
 
 ---
 

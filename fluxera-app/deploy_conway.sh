@@ -127,8 +127,7 @@ echo ""
 echo "📝 Step 5: Deploying to Conway testnet..."
 echo "---------------------------------------"
 
-DEPLOY_OUTPUT=$(linera project publish-and-create \
-    --wait-for-outgoing-messages 2>&1 | tee /dev/tty)
+DEPLOY_OUTPUT=$(linera project publish-and-create 2>&1 | tee /dev/tty)
 
 # Extract application ID from output
 APP_ID=$(echo "$DEPLOY_OUTPUT" | grep -oP "Application ID: \K[a-f0-9]+")

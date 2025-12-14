@@ -1,84 +1,59 @@
 /**
  * FLUXERA DASHBOARD - MAIN PAGE
  *
- * This is the main dashboard that displays real-time analytics from the Fluxera WebAssembly application
+ * Real-time analytics dashboard for the Linera blockchain.
  *
- * WHAT THIS PAGE DOES:
- * 1. Connects to Fluxera GraphQL API (deployed Linera WASM app)
- * 2. Fetches analytics summary, recent events, and chain metrics
- * 3. Displays data in real-time (auto-refreshes every 5 seconds)
- * 4. Shows loading states and error handling
+ * DUAL-MODE ARCHITECTURE:
+ * - Public Mode: View stats, events, messages without wallet connection
+ * - Wallet Mode: Track events and send cross-chain messages
  *
  * DATA FLOW:
- * useAnalyticsSummary() hook
+ * Public hooks (useAnalyticsSummary, useRecentEvents, etc.)
  *   ↓
- * Apollo Client fetches from http://localhost:8080/.../fluxera_app
+ * Public client fetches from Conway testnet GraphQL endpoint
  *   ↓
- * Fluxera service.rs analytics_summary() function
+ * Fluxera WASM app processes queries
  *   ↓
- * Reads blockchain state (total_event_count, unique_users, etc.)
+ * Returns blockchain state data
  *   ↓
- * Returns data to component
- *   ↓
- * Component renders with live blockchain data!
+ * Components render with live data!
  */
 
 "use client";
 
-import { Activity, Database, Globe, Zap, AlertCircle, Loader, TrendingUp } from "lucide-react";
-import { useAnalyticsSummary, useRecentEvents, useAllChainMetrics } from "@/hooks/useFluxera";
-import { FLUXERA_CONFIG } from "@/lib/constants";
+import { Activity, Database, Globe, Zap, AlertCircle, Loader, TrendingUp, Wallet } from "lucide-react";
+import {
+  useAnalyticsSummary,
+  useRecentEvents,
+  useChainMetrics,
+  truncateAddress,
+  formatRelativeTime,
+} from "@/hooks/useFluxera";
+import { useWallet } from "@/components/providers/LineraProvider";
+import { LINERA_CONFIG } from "@/lib/linera-config";
+import { getQueryChainId } from "@/lib/public-client";
 import EventTrackingForm from "@/components/EventTrackingForm";
 import CrossChainMessageForm from "@/components/CrossChainMessageForm";
 import EventsTable from "@/components/EventsTable";
+import MessageTracer from "@/components/MessageTracer";
+import ValidatorStatus from "@/components/ValidatorStatus";
 import Navbar from "@/components/Navbar";
 import Sidebar from "@/components/Sidebar";
 
 export default function Dashboard() {
+  // Wallet state (for showing connect prompt on forms)
+  const { isConnected, chainId: walletChainId } = useWallet();
+
+  // Get current query chain (wallet chain if connected, otherwise default)
+  const queryChainId = getQueryChainId();
+
   /**
-   * FETCH DATA FROM FLUXERA WASM APP
-   *
-   * These hooks automatically:
-   * - Fetch data from GraphQL
-   * - Poll every 5 seconds for updates
-   * - Handle loading and error states
-   * - Cache results for performance
+   * PUBLIC DATA HOOKS
+   * These work without wallet connection - anyone can view
    */
   const { summary, loading: summaryLoading, error: summaryError } = useAnalyticsSummary();
-  const { events, loading: eventsLoading, error: eventsError } = useRecentEvents({ limit: 5 });
-  const { chains, loading: chainsLoading } = useAllChainMetrics();
-
-  /**
-   * FORMAT TIMESTAMP
-   *
-   * Converts Fluxera timestamp string to "X seconds/minutes/hours ago"
-   * Timestamp format from Fluxera: "2025-11-29 07:43:39.273921"
-   */
-  const formatTimeAgo = (timestamp: string) => {
-    try {
-      const eventTime = new Date(timestamp).getTime();
-      const now = Date.now();
-      const diff = Math.floor((now - eventTime) / 1000); // seconds ago
-
-      if (diff < 60) return `${diff}s ago`;
-      if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-      if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
-      return `${Math.floor(diff / 86400)}d ago`;
-    } catch (e) {
-      return timestamp; // Return original if parsing fails
-    }
-  };
-
-  /**
-   * TRUNCATE ADDRESS
-   *
-   * Shortens long addresses/chain IDs for display
-   * Example: "04022f7a91f28...4c1ecaa99"
-   */
-  const truncateAddress = (address: string, start = 8, end = 8) => {
-    if (address.length <= start + end) return address;
-    return `${address.substring(0, start)}...${address.substring(address.length - end)}`;
-  };
+  const { events, loading: eventsLoading, error: eventsError } = useRecentEvents(5);
+  const { chains, loading: chainsLoading } = useChainMetrics();
 
   return (
     <>
@@ -88,15 +63,52 @@ export default function Dashboard() {
       {/* SIDEBAR */}
       <Sidebar currentPage="dashboard" />
 
-      {/* MAIN CONTENT - FULL WIDTH */}
+      {/* MAIN CONTENT */}
       <main className="ml-64 mt-16 min-h-screen bg-gray-900 text-gray-100 p-6">
-        {/* ERROR MESSAGE */}
+        {/* CONNECTION STATUS BANNER */}
         {summaryError && (
           <div className="mb-6 flex items-center space-x-2 rounded-lg bg-red-900/20 border border-red-500/30 p-4 text-red-400">
-            <AlertCircle className="h-5 w-5" />
+            <AlertCircle className="h-5 w-5 flex-shrink-0" />
             <div>
               <p className="font-semibold">Unable to connect to Fluxera</p>
-              <p className="text-sm">Make sure Linera service is running: <code className="text-xs bg-gray-800 px-1 py-0.5 rounded">linera service --port 8080</code></p>
+              <p className="text-sm">
+                Make sure the Fluxera app is deployed on Conway testnet and CHAIN_ID/APP_ID are configured in .env.local
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* CHAIN QUERY INDICATOR */}
+        {isConnected && walletChainId && (
+          <div className="mb-6 flex items-center justify-between rounded-lg bg-green-900/20 border border-green-500/30 p-4">
+            <div className="flex items-center space-x-3">
+              <Database className="h-5 w-5 text-green-400" />
+              <div>
+                <p className="text-sm font-medium text-green-300">Querying Your Chain</p>
+                <p className="text-xs text-green-400/70 font-mono">
+                  {truncateAddress(walletChainId, 10)}
+                </p>
+              </div>
+            </div>
+            <div className="text-xs text-green-400/70">
+              Track events to see them in the explorer below
+            </div>
+          </div>
+        )}
+
+        {/* WALLET CONNECTION PROMPT (when not connected) */}
+        {!isConnected && (
+          <div className="mb-6 flex items-center justify-between rounded-lg bg-blue-900/20 border border-blue-500/30 p-4">
+            <div className="flex items-center space-x-3">
+              <Wallet className="h-5 w-5 text-blue-400" />
+              <div>
+                <p className="text-sm font-medium text-blue-300">Viewing in Public Mode</p>
+                <p className="text-xs text-blue-400/70">Connect a wallet to track events and send messages</p>
+              </div>
+            </div>
+            <div className="flex items-center space-x-2 text-xs text-blue-400">
+              <div className="h-2 w-2 rounded-full bg-blue-500 animate-pulse" />
+              <span>Conway Testnet</span>
             </div>
           </div>
         )}
@@ -104,8 +116,10 @@ export default function Dashboard() {
         {/* STATS CARDS */}
         <div className="mb-6 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
           {/* Total Events Card */}
-          <div className="rounded-lg bg-gradient-to-br from-blue-900/40 to-blue-900/20 border border-blue-500/30 p-6 hover:scale-105 transition-transform">
-            <div className="flex items-center justify-between">
+          <div className="group relative rounded-xl bg-gradient-to-br from-blue-900/40 to-blue-900/20 border border-blue-500/30 p-6 hover:border-blue-400/50 transition-all duration-300 hover:shadow-lg hover:shadow-blue-500/10">
+            {/* Glow effect */}
+            <div className="absolute inset-0 rounded-xl bg-blue-500/5 opacity-0 group-hover:opacity-100 transition-opacity" />
+            <div className="relative flex items-center justify-between">
               <div>
                 <p className="text-sm font-medium text-blue-300">Total Events</p>
                 {summaryLoading ? (
@@ -114,20 +128,23 @@ export default function Dashboard() {
                     <span className="text-lg text-gray-400">Loading...</span>
                   </div>
                 ) : (
-                  <p className="text-3xl font-bold mt-1">{summary?.totalEvents?.toLocaleString() || '0'}</p>
+                  <p className="text-3xl font-bold mt-1 tabular-nums">{summary?.totalEvents?.toLocaleString() || '0'}</p>
                 )}
-                <div className="flex items-center space-x-1 mt-1">
+                <div className="flex items-center space-x-1 mt-2">
                   <TrendingUp className="h-3 w-3 text-green-400" />
                   <span className="text-xs text-green-400">On-chain verified</span>
                 </div>
               </div>
-              <Database className="h-12 w-12 text-blue-500/50" />
+              <div className="p-3 rounded-xl bg-blue-500/10 group-hover:bg-blue-500/20 transition-colors">
+                <Database className="h-8 w-8 text-blue-400" />
+              </div>
             </div>
           </div>
 
           {/* Unique Users Card */}
-          <div className="rounded-lg bg-gradient-to-br from-green-900/40 to-green-900/20 border border-green-500/30 p-6 hover:scale-105 transition-transform">
-            <div className="flex items-center justify-between">
+          <div className="group relative rounded-xl bg-gradient-to-br from-green-900/40 to-green-900/20 border border-green-500/30 p-6 hover:border-green-400/50 transition-all duration-300 hover:shadow-lg hover:shadow-green-500/10">
+            <div className="absolute inset-0 rounded-xl bg-green-500/5 opacity-0 group-hover:opacity-100 transition-opacity" />
+            <div className="relative flex items-center justify-between">
               <div>
                 <p className="text-sm font-medium text-green-300">Unique Users</p>
                 {summaryLoading ? (
@@ -136,20 +153,23 @@ export default function Dashboard() {
                     <span className="text-lg text-gray-400">Loading...</span>
                   </div>
                 ) : (
-                  <p className="text-3xl font-bold mt-1">{summary?.uniqueUsers?.toLocaleString() || '0'}</p>
+                  <p className="text-3xl font-bold mt-1 tabular-nums">{summary?.uniqueUsers?.toLocaleString() || '0'}</p>
                 )}
-                <div className="flex items-center space-x-1 mt-1">
+                <div className="flex items-center space-x-1 mt-2">
                   <Activity className="h-3 w-3 text-green-400" />
                   <span className="text-xs text-green-400">Active addresses</span>
                 </div>
               </div>
-              <Globe className="h-12 w-12 text-green-500/50" />
+              <div className="p-3 rounded-xl bg-green-500/10 group-hover:bg-green-500/20 transition-colors">
+                <Globe className="h-8 w-8 text-green-400" />
+              </div>
             </div>
           </div>
 
           {/* Cross-Chain Messages Card */}
-          <div className="rounded-lg bg-gradient-to-br from-purple-900/40 to-purple-900/20 border border-purple-500/30 p-6 hover:scale-105 transition-transform">
-            <div className="flex items-center justify-between">
+          <div className="group relative rounded-xl bg-gradient-to-br from-purple-900/40 to-purple-900/20 border border-purple-500/30 p-6 hover:border-purple-400/50 transition-all duration-300 hover:shadow-lg hover:shadow-purple-500/10">
+            <div className="absolute inset-0 rounded-xl bg-purple-500/5 opacity-0 group-hover:opacity-100 transition-opacity" />
+            <div className="relative flex items-center justify-between">
               <div>
                 <p className="text-sm font-medium text-purple-300">Cross-Chain Messages</p>
                 {summaryLoading ? (
@@ -158,20 +178,23 @@ export default function Dashboard() {
                     <span className="text-lg text-gray-400">Loading...</span>
                   </div>
                 ) : (
-                  <p className="text-3xl font-bold mt-1">{summary?.totalMessages?.toLocaleString() || '0'}</p>
+                  <p className="text-3xl font-bold mt-1 tabular-nums">{summary?.totalMessages?.toLocaleString() || '0'}</p>
                 )}
-                <div className="flex items-center space-x-1 mt-1">
+                <div className="flex items-center space-x-1 mt-2">
                   <Zap className="h-3 w-3 text-purple-400" />
                   <span className="text-xs text-purple-400">Linera messaging</span>
                 </div>
               </div>
-              <Activity className="h-12 w-12 text-purple-500/50" />
+              <div className="p-3 rounded-xl bg-purple-500/10 group-hover:bg-purple-500/20 transition-colors">
+                <Activity className="h-8 w-8 text-purple-400" />
+              </div>
             </div>
           </div>
 
           {/* Active Chains Card */}
-          <div className="rounded-lg bg-gradient-to-br from-yellow-900/40 to-yellow-900/20 border border-yellow-500/30 p-6 hover:scale-105 transition-transform">
-            <div className="flex items-center justify-between">
+          <div className="group relative rounded-xl bg-gradient-to-br from-yellow-900/40 to-yellow-900/20 border border-yellow-500/30 p-6 hover:border-yellow-400/50 transition-all duration-300 hover:shadow-lg hover:shadow-yellow-500/10">
+            <div className="absolute inset-0 rounded-xl bg-yellow-500/5 opacity-0 group-hover:opacity-100 transition-opacity" />
+            <div className="relative flex items-center justify-between">
               <div>
                 <p className="text-sm font-medium text-yellow-300">Active Chains</p>
                 {chainsLoading ? (
@@ -180,14 +203,16 @@ export default function Dashboard() {
                     <span className="text-lg text-gray-400">Loading...</span>
                   </div>
                 ) : (
-                  <p className="text-3xl font-bold mt-1">{chains?.length || '1'}</p>
+                  <p className="text-3xl font-bold mt-1 tabular-nums">{chains?.length || '1'}</p>
                 )}
-                <div className="flex items-center space-x-1 mt-1">
+                <div className="flex items-center space-x-1 mt-2">
                   <Globe className="h-3 w-3 text-yellow-400" />
                   <span className="text-xs text-yellow-400">Microchains</span>
                 </div>
               </div>
-              <Zap className="h-12 w-12 text-yellow-500/50" />
+              <div className="p-3 rounded-xl bg-yellow-500/10 group-hover:bg-yellow-500/20 transition-colors">
+                <Zap className="h-8 w-8 text-yellow-400" />
+              </div>
             </div>
           </div>
         </div>
@@ -201,13 +226,24 @@ export default function Dashboard() {
           <CrossChainMessageForm />
         </div>
 
+        {/* MESSAGE TRACER - Cross-chain message visualization */}
+        <div className="mb-6">
+          <MessageTracer limit={5} refreshInterval={5000} />
+        </div>
+
         {/* EVENTS TABLE WITH FILTERING */}
         <div className="mb-6">
           <EventsTable />
         </div>
 
-        {/* RECENT EVENTS SECTION */}
+        {/* VALIDATOR STATUS */}
+        <div className="mb-6">
+          <ValidatorStatus />
+        </div>
+
+        {/* RECENT EVENTS & SYSTEM INFO SECTION */}
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+          {/* Recent Events */}
           <div className="rounded-lg bg-gray-800 border border-gray-700 p-6">
             <h3 className="mb-4 text-lg font-semibold flex items-center">
               <Activity className="h-5 w-5 mr-2 text-blue-400" />
@@ -225,10 +261,18 @@ export default function Dashboard() {
                   <span className="ml-2">Failed to load events</span>
                 </div>
               ) : !events || events.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-8 text-gray-400">
-                  <Database className="h-12 w-12 mb-2 opacity-50" />
-                  <p className="text-sm">No events tracked yet</p>
-                  <p className="text-xs mt-1">Track your first event to see it here!</p>
+                <div className="flex flex-col items-center justify-center py-8">
+                  {/* Animated placeholder */}
+                  <div className="relative mb-3">
+                    <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-blue-500/10 to-blue-600/5 border border-blue-500/20 flex items-center justify-center">
+                      <Database className="h-7 w-7 text-blue-500/40" />
+                    </div>
+                    <div className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-blue-500/20 animate-ping" />
+                  </div>
+                  <p className="text-sm text-gray-400 font-medium">No events tracked yet</p>
+                  <p className="text-xs text-gray-500 mt-1 text-center">
+                    {isConnected ? 'Track your first event using the form above!' : 'Connect wallet to start tracking'}
+                  </p>
                 </div>
               ) : (
                 events.map((event) => {
@@ -243,7 +287,7 @@ export default function Dashboard() {
                         <div>
                           <p className="text-sm font-medium text-blue-300">{event.eventType}</p>
                           <p className="text-xs text-gray-400 font-mono">
-                            Owner: {truncateAddress(event.owner || '', 6, 4)}
+                            Owner: {truncateAddress(event.owner || '', 6)}
                           </p>
                           {event.data && event.data !== '{}' && (
                             <p className="text-xs text-gray-500 mt-1">
@@ -253,8 +297,8 @@ export default function Dashboard() {
                         </div>
                       </div>
                       <div className="text-right">
-                        <p className="text-xs text-gray-400">{formatTimeAgo(event.timestamp || '')}</p>
-                        <p className="text-xs text-gray-500 font-mono">ID: {event.eventId?.split('-')[1]}</p>
+                        <p className="text-xs text-gray-400">{formatRelativeTime(event.timestamp || '')}</p>
+                        <p className="text-xs text-gray-500 font-mono">ID: {event.eventId?.split('-')[1] || event.eventId?.slice(0, 8)}</p>
                       </div>
                     </div>
                   );
@@ -270,18 +314,18 @@ export default function Dashboard() {
               System Information
             </h3>
             <div className="space-y-3">
-              {/* Fluxera Application */}
+              {/* Network */}
               <div className="flex items-center justify-between rounded-lg bg-gray-700/50 border border-gray-600/50 p-3">
                 <div className="flex items-center space-x-3">
                   <div className={`h-2 w-2 rounded-full ${summaryError ? 'bg-red-500' : 'bg-green-500 animate-pulse'}`}></div>
                   <div>
-                    <p className="text-sm font-medium">Fluxera WASM App</p>
-                    <p className="text-xs text-gray-400">Linera WebAssembly</p>
+                    <p className="text-sm font-medium">Network</p>
+                    <p className="text-xs text-gray-400">Conway Testnet</p>
                   </div>
                 </div>
                 <div className="text-right">
                   <p className="text-xs text-gray-400">{summaryError ? 'Error' : 'Connected'}</p>
-                  <p className="text-xs text-gray-500">GraphQL</p>
+                  <p className="text-xs text-gray-500">Linera Protocol</p>
                 </div>
               </div>
 
@@ -291,7 +335,9 @@ export default function Dashboard() {
                   <div className="h-2 w-2 rounded-full bg-blue-500"></div>
                   <div>
                     <p className="text-sm font-medium">Chain ID</p>
-                    <p className="text-xs text-gray-400 font-mono">{truncateAddress(summary?.chainId || FLUXERA_CONFIG.CHAIN_ID, 12, 8)}</p>
+                    <p className="text-xs text-gray-400 font-mono">
+                      {truncateAddress(summary?.chainId || LINERA_CONFIG.CHAIN_ID || 'Not configured', 12)}
+                    </p>
                   </div>
                 </div>
                 <div className="text-right">
@@ -306,7 +352,9 @@ export default function Dashboard() {
                   <div className="h-2 w-2 rounded-full bg-purple-500"></div>
                   <div>
                     <p className="text-sm font-medium">Application ID</p>
-                    <p className="text-xs text-gray-400 font-mono">{truncateAddress(FLUXERA_CONFIG.APP_ID, 12, 8)}</p>
+                    <p className="text-xs text-gray-400 font-mono">
+                      {truncateAddress(LINERA_CONFIG.APP_ID || 'Not configured', 12)}
+                    </p>
                   </div>
                 </div>
                 <div className="text-right">
@@ -315,18 +363,18 @@ export default function Dashboard() {
                 </div>
               </div>
 
-              {/* GraphQL Endpoint */}
+              {/* Faucet URL */}
               <div className="flex items-center justify-between rounded-lg bg-gray-700/50 border border-gray-600/50 p-3">
                 <div className="flex items-center space-x-3">
                   <div className="h-2 w-2 rounded-full bg-green-500"></div>
                   <div>
-                    <p className="text-sm font-medium">GraphQL Endpoint</p>
-                    <p className="text-xs text-gray-400">{FLUXERA_CONFIG.GRAPHQL_ENDPOINT}</p>
+                    <p className="text-sm font-medium">Faucet</p>
+                    <p className="text-xs text-gray-400">{LINERA_CONFIG.FAUCET_URL}</p>
                   </div>
                 </div>
                 <div className="text-right">
-                  <p className="text-xs text-gray-400">Local</p>
-                  <p className="text-xs text-gray-500">Port 8080</p>
+                  <p className="text-xs text-gray-400">Active</p>
+                  <p className="text-xs text-gray-500">Free tokens</p>
                 </div>
               </div>
 
@@ -351,7 +399,7 @@ export default function Dashboard() {
         {/* FOOTER INFO */}
         <div className="mt-6 text-center text-sm text-gray-500">
           <p>
-            Powered by Fluxera • Running on Linera Protocol •
+            Powered by Fluxera • Running on Linera Protocol (Conway Testnet) •
             <a href="https://linera.io" target="_blank" rel="noopener noreferrer" className="ml-1 text-blue-400 hover:text-blue-300">
               Learn more →
             </a>

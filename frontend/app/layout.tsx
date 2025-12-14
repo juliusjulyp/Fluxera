@@ -8,18 +8,20 @@
  * 1. Fonts are loaded (Inter for text, JetBrains Mono for code)
  * 2. Global CSS is imported
  * 3. Metadata is set (page title, description for SEO)
- * 4. ApolloProvider is added to enable GraphQL throughout the app
+ * 4. LineraProvider wraps the app for wallet and blockchain access
  *
- * WHY ApolloProviderWrapper:
- * - Next.js 13+ layouts are Server Components by default
- * - Apollo requires Client Component (browser-side React context)
- * - We created ApolloProviderWrapper as a separate client component
- * - Now GraphQL works everywhere in the app!
+ * DUAL-MODE ARCHITECTURE:
+ * - Public Mode: Read-only access to blockchain data (no wallet needed)
+ * - Wallet Mode: Full access including mutations (after wallet connection)
+ *
+ * Users can explore the app without connecting, then connect when they
+ * want to track events or send messages.
  */
 
 import type { Metadata } from "next";
 import { Inter, JetBrains_Mono } from "next/font/google";
-import { ApolloProviderWrapper } from "@/components/providers/ApolloProvider";
+import { LineraProvider } from "@/components/providers/LineraProvider";
+import { SearchProvider } from "@/components/providers/SearchContext";
 import "./globals.css";
 
 const inter = Inter({
@@ -48,16 +50,16 @@ export default function RootLayout({
         className={`${inter.variable} ${jetbrainsMono.variable} antialiased`}
       >
         {/*
-          ApolloProviderWrapper makes GraphQL available to all components
-          Now any component can use:
-          - useAnalyticsSummary()
-          - useRecentEvents()
-          - useTrackEvent()
-          - etc.
+          LineraProvider enables dual-mode access:
+          - Public hooks (useDashboard, useEvents, etc.) work without wallet
+          - Authenticated hooks (useTrackEvent, useSendMessage) require wallet
+          SearchProvider enables global search across components
         */}
-        <ApolloProviderWrapper>
-          {children}
-        </ApolloProviderWrapper>
+        <SearchProvider>
+          <LineraProvider>
+            {children}
+          </LineraProvider>
+        </SearchProvider>
       </body>
     </html>
   );

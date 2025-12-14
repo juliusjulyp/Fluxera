@@ -1,558 +1,490 @@
+'use client';
+
 /**
- * CUSTOM HOOKS FOR FLUXERA DATA
+ * FLUXERA HOOKS
  *
- * These hooks make it super easy to fetch and mutate Fluxera data in React components
+ * React hooks for fetching Fluxera blockchain data.
  *
- * WHY CUSTOM HOOKS:
- * Instead of this in every component:
- *   import { useQuery } from '@apollo/client';
- *   import { GET_ANALYTICS_SUMMARY } from '@/lib/graphql/queries';
- *   const { data, loading, error } = useQuery(GET_ANALYTICS_SUMMARY);
+ * DUAL-MODE ARCHITECTURE:
+ * - PUBLIC HOOKS: Work without wallet - anyone can view data
+ * - AUTHENTICATED HOOKS: Require wallet - for mutations (tracking events, sending messages)
  *
- * We can just do this:
- *   import { useAnalyticsSummary } from '@/hooks/useFluxera';
+ * When wallet is connected, hooks automatically use the authenticated query
+ * (via WASM client) to read from the user's chain. This ensures data written
+ * by the user is immediately visible.
+ *
+ * PUBLIC HOOKS (this file):
+ * - useDashboard() - All dashboard data
+ * - useAnalyticsSummary() - Stats overview
+ * - useRecentEvents() - Live event feed
+ * - useRecentMessages() - Cross-chain messages
+ * - useChainMetrics() - Per-chain stats
+ *
+ * AUTHENTICATED HOOKS (from LineraProvider):
+ * - useTrackEvent() - Track new event
+ * - useSendMessage() - Send cross-chain message
+ */
+
+import { useState, useEffect, useCallback } from 'react';
+import { useAuthenticatedQuery } from '@/components/providers/LineraProvider';
+
+// HTTP client that queries via linera service
+// For production: deploy linera service on a server
+// For local dev: run `linera service --port 8080`
+import {
+  fetchAnalyticsSummary,
+  fetchRecentEvents,
+  fetchEvents,
+  fetchRecentMessages,
+  fetchAllChainMetrics,
+  fetchDashboardData,
+} from '@/lib/public-client';
+
+// ============================================
+// TYPES
+// ============================================
+
+export interface AnalyticsSummary {
+  totalEvents: number;
+  totalMessages: number;
+  uniqueUsers: number;
+  chainId: string;
+}
+
+export interface AnalyticsEvent {
+  eventId: string;
+  eventType: string;
+  owner: string;
+  timestamp: string;
+  data: string;
+  chainId: string;
+}
+
+export interface CrossChainMessage {
+  messageId: string;
+  sourceChain: string;
+  targetChain: string;
+  messageType: string;
+  sentAt: string;
+  payload: string;
+}
+
+export interface ChainMetricsData {
+  chainId: string;
+  metrics: {
+    totalEvents: number;
+    uniqueUsers: number;
+    lastActivity: string;
+    eventTypes: string;
+  };
+}
+
+// ============================================
+// ANALYTICS SUMMARY HOOK
+// ============================================
+
+/**
+ * Fetch high-level statistics
+ *
+ * @param refreshInterval - Auto-refresh interval in ms (default: 5000)
+ *
+ * @example
+ * function StatsBar() {
  *   const { summary, loading, error } = useAnalyticsSummary();
- *
- * BENEFITS:
- * - Cleaner component code
- * - Type safety (TypeScript knows what data looks like)
- * - Consistent error handling
- * - Easy to add polling, caching, etc.
- * - Can add custom logic (data transformation, caching, etc.)
- */
-
-/**
- * IMPORTANT: Apollo Client React hooks for Next.js
- *
- * In Next.js 13+ with app directory, we need to import from the React subpackage
- * This ensures the hooks work properly in Client Components
- */
-import { useQuery, useMutation } from '@apollo/client/react';
-import {
-  GET_ANALYTICS_SUMMARY,
-  GET_RECENT_EVENTS,
-  GET_EVENTS,
-  GET_EVENTS_BY_TYPE,
-  GET_EVENTS_BY_OWNER,
-  GET_CHAIN_METRICS,
-  GET_ALL_CHAIN_METRICS,
-  GET_USER_EVENT_COUNT,
-  GET_RECENT_MESSAGES,
-  GET_MESSAGES,
-  GET_DASHBOARD_DATA,
-} from '@/lib/graphql/queries';
-import {
-  TRACK_EVENT,
-  SEND_CROSS_CHAIN_MESSAGE,
-} from '@/lib/graphql/mutations';
-import {
-  GetAnalyticsSummaryResponse,
-  GetRecentEventsResponse,
-  GetEventsResponse,
-  GetEventsByTypeResponse,
-  GetEventsByOwnerResponse,
-  GetChainMetricsResponse,
-  GetAllChainMetricsResponse,
-  GetUserEventCountResponse,
-  GetRecentMessagesResponse,
-  GetMessagesResponse,
-  GetDashboardDataResponse,
-  TrackEventResponse,
-  SendMessageResponse,
-} from '@/types/fluxera';
-import { POLLING_INTERVALS } from '@/lib/constants';
-
-/**
- * USE ANALYTICS SUMMARY
- *
- * Fetches the high-level statistics (total events, users, messages, etc.)
- *
- * USAGE:
- * function Dashboard() {
- *   const { summary, loading, error, refetch } = useAnalyticsSummary();
- *
- *   if (loading) return <Loader />;
- *   if (error) return <Error />;
- *
- *   return (
- *     <div>
- *       <h1>Total Events: {summary.totalEvents}</h1>
- *       <h2>Unique Users: {summary.uniqueUsers}</h2>
- *       <button onClick={() => refetch()}>Refresh</button>
- *     </div>
- *   );
+ *   if (loading) return <Spinner />;
+ *   return <div>{summary?.totalEvents} events tracked</div>;
  * }
- *
- * OPTIONS:
- * - pollInterval: Auto-refresh every X milliseconds (default: 5 seconds)
- * - skip: Don't fetch until some condition is met
- *
- * RETURNS:
- * - summary: The analytics data (or undefined if loading/error)
- * - loading: Boolean - true while fetching
- * - error: Error object if query failed
- * - refetch: Function to manually refresh the data
  */
-export function useAnalyticsSummary(options?: any) {
-  const { data, loading, error, refetch } = useQuery<GetAnalyticsSummaryResponse>(
-    GET_ANALYTICS_SUMMARY,
-    {
-      pollInterval: POLLING_INTERVALS.STATS, // Refresh every 5 seconds
-      ...options,
-    }
-  );
+export function useAnalyticsSummary(refreshInterval: number = 5000) {
+  const [summary, setSummary] = useState<AnalyticsSummary | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
 
-  return {
-    summary: data?.analyticsSummary,
-    loading,
-    error,
-    refetch,
-  };
+  const refresh = useCallback(async () => {
+    try {
+      const data = await fetchAnalyticsSummary();
+      setSummary(data.analyticsSummary);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err : new Error('Failed to fetch summary'));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    refresh();
+
+    if (refreshInterval > 0) {
+      const interval = setInterval(refresh, refreshInterval);
+      return () => clearInterval(interval);
+    }
+  }, [refresh, refreshInterval]);
+
+  return { summary, loading, error, refresh };
 }
 
+// ============================================
+// RECENT EVENTS HOOK
+// ============================================
+
 /**
- * USE RECENT EVENTS
+ * Fetch most recent events (live feed)
  *
- * Fetches the most recent events (like a timeline)
+ * @param limit - Number of events to fetch (default: 10)
+ * @param refreshInterval - Auto-refresh interval in ms (default: 3000)
  *
- * USAGE:
+ * @example
  * function EventFeed() {
- *   const { events, loading, error } = useRecentEvents({ limit: 10 });
- *
- *   return (
- *     <div>
- *       {events?.map(event => (
- *         <EventCard key={event.eventId} event={event} />
- *       ))}
- *     </div>
- *   );
+ *   const { events, loading } = useRecentEvents(10);
+ *   return events.map(e => <EventCard key={e.eventId} event={e} />);
  * }
- *
- * PARAMETERS:
- * - limit: How many events to fetch (default: 10)
  */
-export function useRecentEvents(variables?: { limit?: number }, options?: any) {
-  const { data, loading, error, refetch } = useQuery<GetRecentEventsResponse>(
-    GET_RECENT_EVENTS,
-    {
-      variables,
-      pollInterval: POLLING_INTERVALS.EVENTS, // Refresh every 3 seconds
-      ...options,
-    }
-  );
+export function useRecentEvents(limit: number = 10, refreshInterval: number = 3000) {
+  const [events, setEvents] = useState<AnalyticsEvent[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
 
-  return {
-    events: data?.recentEvents,
-    loading,
-    error,
-    refetch,
-  };
+  const refresh = useCallback(async () => {
+    try {
+      const data = await fetchRecentEvents(limit);
+      setEvents(data.recentEvents);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err : new Error('Failed to fetch events'));
+    } finally {
+      setLoading(false);
+    }
+  }, [limit]);
+
+  useEffect(() => {
+    refresh();
+
+    if (refreshInterval > 0) {
+      const interval = setInterval(refresh, refreshInterval);
+      return () => clearInterval(interval);
+    }
+  }, [refresh, refreshInterval]);
+
+  return { events, loading, error, refresh };
 }
 
+// ============================================
+// PAGINATED EVENTS HOOK
+// ============================================
+
 /**
- * USE EVENTS
+ * Fetch events with pagination (for explorer)
+ * Uses authenticated query when wallet is connected (reads from user's chain)
+ * Falls back to public HTTP query otherwise
  *
- * Fetches all events with pagination
+ * @param pageSize - Events per page (default: 20)
  *
- * USAGE:
+ * @example
  * function EventExplorer() {
- *   const [page, setPage] = useState(0);
- *   const { events, loading } = useEvents({
- *     offset: page * 100,
- *     limit: 100
- *   });
- *
+ *   const { events, loading, hasMore, loadMore } = useEvents(20);
  *   return (
- *     <div>
- *       {events?.map(event => <EventCard event={event} />)}
- *       <button onClick={() => setPage(page + 1)}>Next Page</button>
- *     </div>
- *   );
- * }
- *
- * PARAMETERS:
- * - offset: Skip this many events
- * - limit: Return this many events (default: 100)
- */
-export function useEvents(variables?: { offset?: number; limit?: number }, options?: any) {
-  const { data, loading, error, refetch, fetchMore } = useQuery<GetEventsResponse>(
-    GET_EVENTS,
-    {
-      variables,
-      ...options,
-    }
-  );
-
-  return {
-    events: data?.events,
-    loading,
-    error,
-    refetch,
-    fetchMore, // Use this for infinite scroll or "load more"
-  };
-}
-
-/**
- * USE EVENTS BY TYPE
- *
- * Fetches events filtered by type (e.g., only "page_view" events)
- *
- * USAGE:
- * function PageViews() {
- *   const { events, loading } = useEventsByType({ eventType: "page_view", limit: 50 });
- *
- *   return <div>{events?.length} page views</div>;
- * }
- */
-export function useEventsByType(variables: { eventType: string; limit?: number }, options?: any) {
-  const { data, loading, error, refetch } = useQuery<GetEventsByTypeResponse>(
-    GET_EVENTS_BY_TYPE,
-    {
-      variables,
-      ...options,
-    }
-  );
-
-  return {
-    events: data?.eventsByType,
-    loading,
-    error,
-    refetch,
-  };
-}
-
-/**
- * USE EVENTS BY OWNER
- *
- * Fetches events for a specific user/address
- *
- * USAGE:
- * function UserProfile({ userAddress }) {
- *   const { events, loading } = useEventsByOwner({ owner: userAddress });
- *
- *   return (
- *     <div>
- *       <h2>Activity for {userAddress}</h2>
- *       {events?.map(event => <EventCard event={event} />)}
- *     </div>
+ *     <>
+ *       {events.map(e => <EventRow key={e.eventId} event={e} />)}
+ *       {hasMore && <button onClick={loadMore}>Load More</button>}
+ *     </>
  *   );
  * }
  */
-export function useEventsByOwner(variables: { owner: string; limit?: number }, options?: any) {
-  const { data, loading, error, refetch } = useQuery<GetEventsByOwnerResponse>(
-    GET_EVENTS_BY_OWNER,
-    {
-      variables,
-      ...options,
-    }
-  );
+export function useEvents(pageSize: number = 20) {
+  const [events, setEvents] = useState<AnalyticsEvent[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
+  const [offset, setOffset] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
 
-  return {
-    events: data?.eventsByOwner,
-    loading,
-    error,
-    refetch,
-  };
+  // Get authenticated query if available
+  const { query: authQuery, isConnected } = useAuthenticatedQuery();
+
+  const loadEvents = useCallback(async (newOffset: number = 0, append: boolean = false) => {
+    setLoading(true);
+    try {
+      let data;
+
+      if (isConnected && authQuery) {
+        // Use authenticated query (reads from user's chain via WASM client)
+        console.log('[useEvents] Using authenticated query');
+        const graphqlQuery = `query { events(offset: ${newOffset}, limit: ${pageSize}) { eventId eventType owner timestamp data chainId } }`;
+        const result = await authQuery(graphqlQuery);
+        data = { events: result?.events || [] };
+      } else {
+        // Fall back to public HTTP query
+        console.log('[useEvents] Using public query');
+        data = await fetchEvents(newOffset, pageSize);
+      }
+
+      if (append) {
+        setEvents(prev => [...prev, ...(data.events || [])]);
+      } else {
+        setEvents(data.events || []);
+      }
+      setHasMore((data.events || []).length === pageSize);
+      setOffset(newOffset);
+      setError(null);
+    } catch (err) {
+      console.error('[useEvents] Error:', err);
+      setError(err instanceof Error ? err : new Error('Failed to fetch events'));
+    } finally {
+      setLoading(false);
+    }
+  }, [pageSize, isConnected, authQuery]);
+
+  const loadMore = useCallback(() => {
+    if (!loading && hasMore) {
+      loadEvents(offset + pageSize, true);
+    }
+  }, [loading, hasMore, offset, pageSize, loadEvents]);
+
+  const refresh = useCallback(() => {
+    setOffset(0);
+    loadEvents(0, false);
+  }, [loadEvents]);
+
+  useEffect(() => {
+    loadEvents(0);
+  }, [loadEvents]);
+
+  return { events, loading, error, hasMore, loadMore, refresh };
 }
 
-/**
- * USE CHAIN METRICS
- *
- * Fetches metrics for a specific chain
- *
- * USAGE:
- * function ChainCard({ chainId }) {
- *   const { metrics, loading } = useChainMetrics({ chainId });
- *
- *   if (!metrics) return null;
- *
- *   return (
- *     <div>
- *       <h3>Chain: {chainId.slice(0, 8)}...</h3>
- *       <p>{metrics.totalEvents} events</p>
- *       <p>{metrics.uniqueUsers} users</p>
- *     </div>
- *   );
- * }
- */
-export function useChainMetrics(variables: { chainId: string }, options?: any) {
-  const { data, loading, error, refetch } = useQuery<GetChainMetricsResponse>(
-    GET_CHAIN_METRICS,
-    {
-      variables,
-      ...options,
-    }
-  );
-
-  return {
-    metrics: data?.chainMetrics,
-    loading,
-    error,
-    refetch,
-  };
-}
+// ============================================
+// RECENT MESSAGES HOOK
+// ============================================
 
 /**
- * USE ALL CHAIN METRICS
+ * Fetch recent cross-chain messages
+ * Uses authenticated query when wallet is connected (reads from user's chain)
+ * Falls back to public HTTP query otherwise
  *
- * Fetches metrics for ALL chains in the network
+ * @param limit - Number of messages (default: 10)
+ * @param refreshInterval - Auto-refresh interval (default: 5000)
  *
- * USAGE:
- * function ChainList() {
- *   const { chains, loading } = useAllChainMetrics();
- *
- *   return (
- *     <div>
- *       {chains?.map(({ chainId, metrics }) => (
- *         <ChainCard key={chainId} chainId={chainId} metrics={metrics} />
- *       ))}
- *     </div>
- *   );
- * }
- */
-export function useAllChainMetrics(options?: any) {
-  const { data, loading, error, refetch } = useQuery<GetAllChainMetricsResponse>(
-    GET_ALL_CHAIN_METRICS,
-    {
-      pollInterval: POLLING_INTERVALS.STATS,
-      ...options,
-    }
-  );
-
-  return {
-    chains: data?.allChainMetrics,
-    loading,
-    error,
-    refetch,
-  };
-}
-
-/**
- * USE USER EVENT COUNT
- *
- * Get the number of events a user has tracked
- *
- * USAGE:
- * function UserBadge({ address }) {
- *   const { count, loading } = useUserEventCount({ owner: address });
- *
- *   return <span>{count} events tracked</span>;
- * }
- */
-export function useUserEventCount(variables: { owner: string }, options?: any) {
-  const { data, loading, error, refetch } = useQuery<GetUserEventCountResponse>(
-    GET_USER_EVENT_COUNT,
-    {
-      variables,
-      ...options,
-    }
-  );
-
-  return {
-    count: data?.userEventCount,
-    loading,
-    error,
-    refetch,
-  };
-}
-
-/**
- * USE RECENT MESSAGES
- *
- * Fetches recent cross-chain messages
- *
- * USAGE:
+ * @example
  * function MessageFeed() {
- *   const { messages, loading } = useRecentMessages({ limit: 10 });
- *
- *   return (
- *     <div>
- *       {messages?.map(msg => (
- *         <MessageCard key={msg.messageId} message={msg} />
- *       ))}
- *     </div>
- *   );
+ *   const { messages, loading } = useRecentMessages(5);
+ *   return messages.map(m => <MessageCard key={m.messageId} message={m} />);
  * }
  */
-export function useRecentMessages(variables?: { limit?: number }, options?: any) {
-  const { data, loading, error, refetch } = useQuery<GetRecentMessagesResponse>(
-    GET_RECENT_MESSAGES,
-    {
-      variables,
-      pollInterval: POLLING_INTERVALS.MESSAGES,
-      ...options,
-    }
-  );
+export function useRecentMessages(limit: number = 10, refreshInterval: number = 5000) {
+  const [messages, setMessages] = useState<CrossChainMessage[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
 
-  return {
-    messages: data?.recentMessages,
-    loading,
-    error,
-    refetch,
-  };
+  // Get authenticated query if available
+  const { query: authQuery, isConnected } = useAuthenticatedQuery();
+
+  const refresh = useCallback(async () => {
+    try {
+      let data;
+
+      if (isConnected && authQuery) {
+        // Use authenticated query (reads from user's chain via WASM client)
+        console.log('[useRecentMessages] Using authenticated query');
+        const graphqlQuery = `query { recentMessages(limit: ${limit}) { messageId sourceChain targetChain messageType sentAt payload } }`;
+        const result = await authQuery(graphqlQuery);
+        data = { recentMessages: result?.recentMessages || [] };
+      } else {
+        // Fall back to public HTTP query
+        console.log('[useRecentMessages] Using public query');
+        data = await fetchRecentMessages(limit);
+      }
+
+      setMessages(data.recentMessages || []);
+      setError(null);
+    } catch (err) {
+      console.error('[useRecentMessages] Error:', err);
+      setError(err instanceof Error ? err : new Error('Failed to fetch messages'));
+    } finally {
+      setLoading(false);
+    }
+  }, [limit, isConnected, authQuery]);
+
+  useEffect(() => {
+    refresh();
+
+    if (refreshInterval > 0) {
+      const interval = setInterval(refresh, refreshInterval);
+      return () => clearInterval(interval);
+    }
+  }, [refresh, refreshInterval]);
+
+  return { messages, loading, error, refresh };
 }
 
+// ============================================
+// CHAIN METRICS HOOK
+// ============================================
+
 /**
- * USE MESSAGES
+ * Fetch metrics for all tracked chains
  *
- * Fetches all messages with pagination
+ * @param refreshInterval - Auto-refresh interval (default: 10000)
+ *
+ * @example
+ * function ChainList() {
+ *   const { chains, loading } = useChainMetrics();
+ *   return chains.map(c => <ChainCard key={c.chainId} chain={c} />);
+ * }
  */
-export function useMessages(variables?: { offset?: number; limit?: number }, options?: any) {
-  const { data, loading, error, refetch, fetchMore } = useQuery<GetMessagesResponse>(
-    GET_MESSAGES,
-    {
-      variables,
-      ...options,
-    }
-  );
+export function useChainMetrics(refreshInterval: number = 10000) {
+  const [chains, setChains] = useState<ChainMetricsData[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
 
-  return {
-    messages: data?.messages,
-    loading,
-    error,
-    refetch,
-    fetchMore,
-  };
+  const refresh = useCallback(async () => {
+    try {
+      const data = await fetchAllChainMetrics();
+      setChains(data.allChainMetrics);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err : new Error('Failed to fetch chain metrics'));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    refresh();
+
+    if (refreshInterval > 0) {
+      const interval = setInterval(refresh, refreshInterval);
+      return () => clearInterval(interval);
+    }
+  }, [refresh, refreshInterval]);
+
+  return { chains, loading, error, refresh };
+}
+
+// ============================================
+// DASHBOARD HOOK (ALL DATA IN ONE)
+// ============================================
+
+interface DashboardData {
+  summary: AnalyticsSummary | null;
+  events: AnalyticsEvent[];
+  messages: CrossChainMessage[];
+  chains: ChainMetricsData[];
 }
 
 /**
- * USE DASHBOARD DATA
+ * Fetch all dashboard data in a single query
+ * More efficient than multiple separate queries
  *
- * Fetches EVERYTHING needed for the dashboard in ONE query
- * This is more efficient than making multiple separate queries
+ * @param refreshInterval - Auto-refresh interval (default: 5000)
  *
- * USAGE:
+ * @example
  * function Dashboard() {
- *   const { data, loading, error } = useDashboardData({
- *     eventsLimit: 10,
- *     messagesLimit: 5
- *   });
+ *   const { summary, events, messages, chains, loading } = useDashboard();
  *
  *   if (loading) return <Loader />;
- *   if (error) return <Error />;
  *
  *   return (
- *     <div>
- *       <StatsCards summary={data.analyticsSummary} />
- *       <EventFeed events={data.recentEvents} />
- *       <MessageFeed messages={data.recentMessages} />
- *       <ChainList chains={data.allChainMetrics} />
- *     </div>
+ *     <>
+ *       <StatsCards summary={summary} />
+ *       <EventFeed events={events} />
+ *       <MessageFlow messages={messages} />
+ *       <ChainList chains={chains} />
+ *     </>
  *   );
  * }
  */
-export function useDashboardData(variables?: { eventsLimit?: number; messagesLimit?: number }, options?: any) {
-  const { data, loading, error, refetch } = useQuery<GetDashboardDataResponse>(
-    GET_DASHBOARD_DATA,
-    {
-      variables,
-      pollInterval: POLLING_INTERVALS.STATS,
-      ...options,
+export function useDashboard(refreshInterval: number = 5000) {
+  const [data, setData] = useState<DashboardData>({
+    summary: null,
+    events: [],
+    messages: [],
+    chains: [],
+  });
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
+
+  const refresh = useCallback(async () => {
+    try {
+      const result = await fetchDashboardData(10, 5);
+      setData({
+        summary: result.analyticsSummary,
+        events: result.recentEvents,
+        messages: result.recentMessages,
+        chains: result.allChainMetrics,
+      });
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err : new Error('Failed to fetch dashboard data'));
+    } finally {
+      setLoading(false);
     }
-  );
+  }, []);
 
-  return {
-    data,
-    loading,
-    error,
-    refetch,
+  useEffect(() => {
+    refresh();
+
+    if (refreshInterval > 0) {
+      const interval = setInterval(refresh, refreshInterval);
+      return () => clearInterval(interval);
+    }
+  }, [refresh, refreshInterval]);
+
+  return { ...data, loading, error, refresh };
+}
+
+// ============================================
+// UTILITY FUNCTIONS
+// ============================================
+
+/**
+ * Truncate address for display
+ * "0x1234567890abcdef" → "0x1234...cdef"
+ */
+export function truncateAddress(address: string, chars: number = 6): string {
+  if (!address) return '';
+  if (address.length <= chars * 2 + 3) return address;
+  return `${address.slice(0, chars)}...${address.slice(-chars)}`;
+}
+
+/**
+ * Format timestamp to relative time
+ * "2024-01-01T00:00:00Z" → "5s ago"
+ */
+export function formatRelativeTime(timestamp: string): string {
+  const now = Date.now();
+  const time = new Date(timestamp).getTime();
+  const diff = Math.floor((now - time) / 1000);
+
+  if (diff < 0) return 'just now';
+  if (diff < 60) return `${diff}s ago`;
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+  return `${Math.floor(diff / 86400)}d ago`;
+}
+
+/**
+ * Parse event type to display name
+ * "token_transfer" → "Token Transfer"
+ */
+export function formatEventType(eventType: string): string {
+  return eventType
+    .split('_')
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
+}
+
+/**
+ * Get color for event type (for badges/tags)
+ */
+export function getEventTypeColor(eventType: string): string {
+  const colors: Record<string, string> = {
+    token_transfer: 'bg-blue-500',
+    swap_executed: 'bg-green-500',
+    nft_mint: 'bg-purple-500',
+    cross_chain_send: 'bg-yellow-500',
+    cross_chain_receive: 'bg-orange-500',
+    user_signup: 'bg-pink-500',
+    transaction: 'bg-indigo-500',
   };
-}
-
-/**
- * USE TRACK EVENT (MUTATION)
- *
- * Hook for tracking a new event
- *
- * USAGE:
- * function EventForm() {
- *   const [trackEvent, { loading, error }] = useTrackEvent();
- *
- *   const handleSubmit = async (e) => {
- *     e.preventDefault();
- *
- *     const result = await trackEvent({
- *       variables: {
- *         eventType: "button_click",
- *         data: JSON.stringify({ button: "submit" })
- *       }
- *     });
- *
- *     // Parse the JSON response
- *     const response = JSON.parse(result.data.trackEvent);
- *     console.log("Event ID:", response.event_id);
- *   };
- *
- *   return (
- *     <form onSubmit={handleSubmit}>
- *       <button type="submit" disabled={loading}>
- *         {loading ? "Tracking..." : "Track Event"}
- *       </button>
- *     </form>
- *   );
- * }
- *
- * WHAT HAPPENS:
- * 1. User submits form
- * 2. trackEvent() is called with variables
- * 3. GraphQL mutation sent to Fluxera
- * 4. contract.rs execute_operation() runs
- * 5. Event saved to blockchain
- * 6. Response returned with event_id
- * 7. Apollo cache updated (can refetch queries automatically)
- */
-export function useTrackEvent(options?: any) {
-  return useMutation(TRACK_EVENT, {
-    // After successful mutation, refetch these queries to update UI
-    refetchQueries: [
-      { query: GET_ANALYTICS_SUMMARY },
-      { query: GET_RECENT_EVENTS },
-    ],
-    ...options,
-  });
-}
-
-/**
- * USE SEND CROSS CHAIN MESSAGE (MUTATION)
- *
- * Hook for sending a message to another chain
- *
- * USAGE:
- * function SendMessageForm() {
- *   const [sendMessage, { loading, error }] = useSendCrossChainMessage();
- *
- *   const handleSend = async () => {
- *     const result = await sendMessage({
- *       variables: {
- *         targetChain: "chain_002",
- *         messageType: "analytics_sync",
- *         payload: JSON.stringify({ data: "..." })
- *       }
- *     });
- *
- *     const response = JSON.parse(result.data.sendCrossChainMessage);
- *     console.log("Message ID:", response.message_id);
- *   };
- *
- *   return <button onClick={handleSend}>Send Message</button>;
- * }
- *
- * WHAT HAPPENS:
- * 1. sendMessage() called with target chain and data
- * 2. GraphQL mutation sent
- * 3. contract.rs send_cross_chain_message() runs
- * 4. Linera's runtime.prepare_message().send_to() sends message
- * 5. Message stored on source chain
- * 6. Message delivered to target chain
- * 7. Response returned with message_id
- */
-export function useSendCrossChainMessage(options?: any) {
-  return useMutation(SEND_CROSS_CHAIN_MESSAGE, {
-    // After sending message, refetch message lists
-    refetchQueries: [
-      { query: GET_ANALYTICS_SUMMARY },
-      { query: GET_RECENT_MESSAGES },
-    ],
-    ...options,
-  });
+  return colors[eventType] || 'bg-gray-500';
 }
