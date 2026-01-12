@@ -90,9 +90,8 @@ WALLET_OUTPUT=$(linera wallet show)
 echo "$WALLET_OUTPUT"
 echo ""
 
-# Extract default chain ID (the one tagged with DEFAULT)
-# Look for the line before "Tags: DEFAULT" which contains the Chain ID
-DEFAULT_CHAIN=$(echo "$WALLET_OUTPUT" | grep -B 1 "Tags:.*DEFAULT" | grep "Chain ID:" | awk '{print $NF}')
+# Extract default chain ID (first 64-char hex string from table output)
+DEFAULT_CHAIN=$(echo "$WALLET_OUTPUT" | grep -oE '[a-f0-9]{64}' | head -1)
 
 if [ -z "$DEFAULT_CHAIN" ]; then
     echo "❌ Error: Could not find default chain"

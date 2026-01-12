@@ -45,3 +45,21 @@ node_modules/
 # Build outputs
 /dist/
 /build/
+
+
+
+# pnpm store (local cache)
+.pnpm-store/
+
+# node artifacts
+node_modules/
+frontend/node_modules/
+
+# build outputs
+dist/
+build/
+target/
+
+# environment files
+.env
+.env.*

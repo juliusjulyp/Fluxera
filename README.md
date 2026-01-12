@@ -27,7 +27,46 @@ As Linera enables applications to scale horizontally by creating new microchains
 **Tomorrow:** Power real-time analytics across millions of parallel applications
 **Future:** Enable AI-driven insights and cross-application intelligence in the Linera ecosystem
 
-## 🧪 How to Test This Application
+---
+
+## 🐳 Quick Start (Docker)
+
+**The easiest way to test Fluxera** - one command, everything runs:
+
+```bash
+# Clone the repository
+git clone https://github.com/juliusjulyp/Fluxera.git
+cd Fluxera
+
+# Start everything with Docker Compose
+docker compose up --force-recreate
+```
+
+This will:
+1. Build a container with Rust + Linera CLI + Node.js
+2. Start a local Linera network with faucet
+3. Build and deploy the Fluxera WASM application
+4. Launch the frontend dashboard
+
+**Access the application:**
+- **Frontend Dashboard:** http://localhost:5173
+- **Linera Faucet:** http://localhost:8080
+- **Validator Proxy:** http://localhost:9001
+
+**What you can do:**
+- View real-time blockchain statistics
+- Connect a session wallet (auto-funded by faucet)
+- Track custom analytics events on-chain
+- Send cross-chain messages between microchains
+
+**Stop everything:**
+```bash
+docker compose down
+```
+
+---
+
+## 🧪 Manual Setup (Alternative)
 
 Follow these steps to run and test the complete Fluxera stack locally:
 

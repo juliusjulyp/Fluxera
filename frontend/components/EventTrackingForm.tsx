@@ -21,8 +21,9 @@
 'use client';
 
 import { useState } from 'react';
-import { Wallet, Loader2, CheckCircle, AlertCircle, Zap } from 'lucide-react';
+import { Loader2, CheckCircle, AlertCircle, Zap, TestTube } from 'lucide-react';
 import { useTrackEvent, useWallet } from '@/components/providers/LineraProvider';
+import { isLocalTestingMode, trackEventDirect } from '@/lib/public-client';
 
 export default function EventTrackingForm() {
   const [eventType, setEventType] = useState('');
@@ -36,14 +37,18 @@ export default function EventTrackingForm() {
   const { isConnected } = useWallet();
   const { trackEvent } = useTrackEvent();
 
+  // Check if we're in local testing mode
+  const localMode = isLocalTestingMode();
+  const canSubmit = isConnected || localMode;
+
   /**
    * Handle form submission
    */
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!isConnected) {
-      setError('Please connect your wallet first');
+    if (!canSubmit) {
+      setError('Please connect your wallet or enable local testing mode');
       return;
     }
 
@@ -51,7 +56,23 @@ export default function EventTrackingForm() {
     setError(null);
 
     try {
-      const result = await trackEvent(eventType, customData || '{}');
+      let result;
+
+      if (isConnected) {
+        // Use wallet connection for mutations
+        result = await trackEvent(eventType, customData || '{}');
+      } else if (localMode) {
+        // Use direct HTTP mutation for local testing
+        console.log('[LocalMode] Tracking event via direct HTTP...');
+        const response = await trackEventDirect(eventType, customData || '{}');
+        result = {
+          success: true,
+          eventId: response.trackEvent || `evt_${Date.now()}`,
+          timestamp: new Date().toISOString(),
+        };
+      } else {
+        result = { success: false, error: 'No connection method available' };
+      }
 
       if (result.success) {
         console.log('Event tracked successfully:', result);
@@ -78,13 +99,13 @@ export default function EventTrackingForm() {
         Track New Event
       </h2>
 
-      {/* Wallet not connected prompt */}
-      {!isConnected && (
-        <div className="mb-4 p-4 bg-yellow-500/10 border border-yellow-500/30 rounded-lg flex items-center space-x-3">
-          <Wallet className="h-5 w-5 text-yellow-400 flex-shrink-0" />
+      {/* Local testing mode indicator */}
+      {localMode && !isConnected && (
+        <div className="mb-4 p-4 bg-green-500/10 border border-green-500/30 rounded-lg flex items-center space-x-3">
+          <TestTube className="h-5 w-5 text-green-400 flex-shrink-0" />
           <div>
-            <p className="text-yellow-300 font-medium text-sm">Wallet Required</p>
-            <p className="text-yellow-400/70 text-xs">Connect your wallet to track events on the blockchain</p>
+            <p className="text-green-300 font-medium text-sm">Local Testing Mode</p>
+            <p className="text-green-400/70 text-xs">Connected to local Linera network. Events will be tracked directly via HTTP.</p>
           </div>
         </div>
       )}
@@ -122,9 +143,9 @@ export default function EventTrackingForm() {
             type="text"
             value={eventType}
             onChange={(e) => setEventType(e.target.value)}
-            placeholder="Enter your event type..."
+            placeholder="e.g., page_view, button_click, user_signup"
             required
-            disabled={!isConnected}
+            disabled={!canSubmit}
             className="w-full px-4 py-2 bg-gray-900/50 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
           />
         </div>
@@ -138,9 +159,9 @@ export default function EventTrackingForm() {
             id="customData"
             value={customData}
             onChange={(e) => setCustomData(e.target.value)}
-            placeholder='{"action": "page_view", "user": "alice", "page": "/dashboard", "timestamp": "2024-01-15"}'
+            placeholder='{"action": "page_view", "user": "alice", "page": "/dashboard"}'
             rows={4}
-            disabled={!isConnected}
+            disabled={!canSubmit}
             className="w-full px-4 py-2 bg-gray-900/50 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm disabled:opacity-50 disabled:cursor-not-allowed"
           />
         </div>
@@ -148,7 +169,7 @@ export default function EventTrackingForm() {
         {/* Submit Button */}
         <button
           type="submit"
-          disabled={loading || !eventType || !isConnected}
+          disabled={loading || !eventType || !canSubmit}
           className="w-full px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 disabled:from-gray-600 disabled:to-gray-600 text-white font-semibold rounded-lg transition-all duration-200 disabled:cursor-not-allowed flex items-center justify-center gap-2"
         >
           {loading ? (
@@ -156,13 +177,11 @@ export default function EventTrackingForm() {
               <Loader2 className="h-5 w-5 animate-spin" />
               <span>Tracking Event...</span>
             </>
-          ) : !isConnected ? (
-            <>
-              <Wallet className="h-5 w-5" />
-              <span>Connect Wallet to Track</span>
-            </>
           ) : (
-            <span>🚀 Track Event on Blockchain</span>
+            <>
+              {localMode && !isConnected && <TestTube className="h-5 w-5" />}
+              <span>Track Event on Blockchain</span>
+            </>
           )}
         </button>
       </form>
@@ -171,7 +190,11 @@ export default function EventTrackingForm() {
       <div className="mt-4 p-3 bg-blue-500/10 border border-blue-500/30 rounded-lg">
         <p className="text-blue-300 text-sm">
           💡 <strong>How it works:</strong> Fluxera is an <strong>event indexer</strong> - it records and tracks events on Linera.
-          Your event label and data are stored on-chain for analytics. This does NOT execute any DeFi operations.
+          {localMode && !isConnected ? (
+            <span> Running in <strong>local testing mode</strong> - events are sent directly to your local network.</span>
+          ) : (
+            <span> Your event label and data are stored on-chain for analytics.</span>
+          )}
         </p>
       </div>
     </div>

@@ -10,7 +10,7 @@ async-graphql = "7.0"
 async-trait = "0.1"
 bcs = "0.1"
 futures = "0.3"
-linera-sdk = { path = "../linera-protocol/linera-sdk" }
+linera-sdk = "0.15.8"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 thiserror = "1.0"

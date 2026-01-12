@@ -12,7 +12,7 @@
  *
  * DEPLOYMENT:
  * Requires `linera service` running. Set NEXT_PUBLIC_LINERA_SERVICE to your service URL.
- * - Local development: http://localhost:8080
+ * - Local development: http://localhost:8081 (via Docker)
  * - Production: Deploy linera service on a server and point to it
  */
 
@@ -45,7 +45,7 @@ export function getQueryChainId(): string {
  * Uses dynamic chain ID if set, otherwise falls back to env config
  */
 function getGraphQLEndpoint(overrideChainId?: string): string {
-  const baseUrl = process.env.NEXT_PUBLIC_LINERA_SERVICE || 'http://localhost:8080';
+  const baseUrl = process.env.NEXT_PUBLIC_LINERA_SERVICE || 'http://localhost:8081';
   const chainId = overrideChainId || dynamicChainId || process.env.NEXT_PUBLIC_CHAIN_ID || '';
   const appId = LINERA_CONFIG.APP_ID;
 
@@ -60,7 +60,28 @@ function getGraphQLEndpoint(overrideChainId?: string): string {
  * Get the endpoint URL (for display purposes)
  */
 export function getServiceEndpoint(): string {
-  return process.env.NEXT_PUBLIC_LINERA_SERVICE || 'http://localhost:8080';
+  return process.env.NEXT_PUBLIC_LINERA_SERVICE || 'http://localhost:8081';
+}
+
+// ============================================
+// LOCAL TESTING MODE
+// ============================================
+
+/**
+ * Check if we're in local testing mode
+ * In local mode, mutations can be executed directly via HTTP without wallet
+ */
+export function isLocalTestingMode(): boolean {
+  return process.env.NEXT_PUBLIC_LOCAL_MODE === 'true' ||
+         (process.env.NEXT_PUBLIC_LINERA_SERVICE || '').includes('localhost');
+}
+
+/**
+ * Get a test owner address for local testing
+ * This is used when no wallet is connected
+ */
+export function getTestOwner(): string {
+  return process.env.NEXT_PUBLIC_TEST_OWNER || 'test-user-local';
 }
 
 // ============================================
@@ -126,6 +147,102 @@ export async function publicQuery<T = unknown>(
     console.error('[PublicClient] Query failed:', error);
     throw error;
   }
+}
+
+/**
+ * Execute a public GraphQL mutation against the Fluxera application
+ * Works in local testing mode - sends mutations directly via HTTP
+ *
+ * @param mutation - GraphQL mutation string
+ * @param variables - Optional mutation variables
+ * @returns Mutation result
+ */
+export async function publicMutation<T = unknown>(
+  mutation: string,
+  variables?: Record<string, unknown>
+): Promise<T> {
+  const endpoint = getGraphQLEndpoint();
+
+  console.log('[PublicClient] Mutating:', endpoint);
+  console.log('[PublicClient] Mutation:', mutation.trim().substring(0, 100) + '...');
+
+  try {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        query: mutation,
+        variables,
+      }),
+    });
+
+    console.log('[PublicClient] Response status:', response.status);
+
+    if (!response.ok) {
+      const text = await response.text();
+      console.error('[PublicClient] HTTP error response:', text);
+      throw new Error(`HTTP error: ${response.status} ${response.statusText}`);
+    }
+
+    const result: GraphQLResponse<T> = await response.json();
+    console.log('[PublicClient] Mutation result:', result);
+
+    if (result.errors && result.errors.length > 0) {
+      console.error('[PublicClient] GraphQL errors:', result.errors);
+      throw new Error(result.errors[0].message);
+    }
+
+    if (!result.data) {
+      console.warn('[PublicClient] No data in response');
+      // For mutations, empty response might still be success
+      return {} as T;
+    }
+
+    return result.data;
+  } catch (error) {
+    console.error('[PublicClient] Mutation failed:', error);
+    throw error;
+  }
+}
+
+// ============================================
+// PRE-BUILT MUTATIONS (LOCAL TESTING)
+// ============================================
+
+/**
+ * Track an event directly via HTTP (local testing mode)
+ */
+export async function trackEventDirect(eventType: string, data: string) {
+  const escapedData = data.replace(/"/g, '\\"');
+
+  return publicMutation<{ trackEvent: string }>(`
+    mutation {
+      trackEvent(eventType: "${eventType}", data: "${escapedData}")
+    }
+  `);
+}
+
+/**
+ * Send a cross-chain message directly via HTTP (local testing mode)
+ */
+export async function sendMessageDirect(
+  targetChain: string,
+  messageType: string,
+  payload: string
+) {
+  const escapedPayload = payload.replace(/"/g, '\\"');
+
+  return publicMutation<{ sendCrossChainMessage: string }>(`
+    mutation {
+      sendCrossChainMessage(
+        targetChain: "${targetChain}",
+        messageType: "${messageType}",
+        payload: "${escapedPayload}"
+      )
+    }
+  `);
 }
 
 // ============================================

@@ -1,20 +1,21 @@
 /**
  * LINERA CONFIGURATION
  *
- * Configuration for connecting to Linera Conway testnet via @linera/client
+ * Configuration for connecting to Linera local network via @linera/client
+ * Defaults to local Docker setup, override with env vars for testnet
  */
 
 export const LINERA_CONFIG = {
-  // Conway testnet faucet - creates wallets and claims chains
-  FAUCET_URL: process.env.NEXT_PUBLIC_FAUCET_URL || 'https://faucet.testnet-conway.linera.net',
+  // Faucet URL - local network by default, override with env var for testnet
+  FAUCET_URL: process.env.NEXT_PUBLIC_FAUCET_URL || 'http://localhost:8080',
 
-  // Linera service URL for public queries
-  SERVICE_URL: process.env.NEXT_PUBLIC_LINERA_SERVICE || 'https://conway.linera.net',
+  // Linera service URL for public queries - local by default
+  SERVICE_URL: process.env.NEXT_PUBLIC_LINERA_SERVICE || 'http://localhost:8081',
 
-  // Chain ID where Fluxera is deployed (set after deploying to Conway)
+  // Chain ID where Fluxera is deployed (set dynamically by run.bash)
   CHAIN_ID: process.env.NEXT_PUBLIC_CHAIN_ID || '',
 
-  // Fluxera application ID (set after deploying to Conway)
+  // Fluxera application ID (set dynamically by run.bash)
   APP_ID: process.env.NEXT_PUBLIC_APP_ID || '',
 
   // Storage keys for wallet persistence
