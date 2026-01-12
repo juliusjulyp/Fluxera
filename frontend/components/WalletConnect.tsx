@@ -459,7 +459,10 @@ export default function WalletConnect() {
             {/* Footer */}
             <div className="p-4 border-t border-gray-700 bg-gray-800/50 rounded-b-xl">
               <p className="text-xs text-gray-500 text-center">
-                By connecting, you agree to use Conway Testnet for testing purposes only.
+                {localMode
+                  ? 'Running on local Linera network. Wallet connection is optional.'
+                  : 'By connecting, you agree to use the network for testing purposes only.'
+                }
               </p>
             </div>
           </div>

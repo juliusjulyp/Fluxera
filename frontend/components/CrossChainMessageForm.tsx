@@ -22,8 +22,9 @@
 'use client';
 
 import { useState } from 'react';
-import { Wallet, Loader2, CheckCircle, AlertCircle, MessageSquare } from 'lucide-react';
+import { Loader2, CheckCircle, AlertCircle, MessageSquare, TestTube } from 'lucide-react';
 import { useSendMessage, useWallet } from '@/components/providers/LineraProvider';
+import { isLocalTestingMode, sendMessageDirect } from '@/lib/public-client';
 
 export default function CrossChainMessageForm() {
   const [targetChain, setTargetChain] = useState('');
@@ -38,6 +39,10 @@ export default function CrossChainMessageForm() {
   // Get wallet state and send message function
   const { isConnected, chainId: myChainId } = useWallet();
   const { sendMessage } = useSendMessage();
+
+  // Check if we're in local testing mode
+  const localMode = isLocalTestingMode();
+  const canSubmit = isConnected || localMode;
 
   /**
    * Normalize chain ID - strip 0x prefix if present
@@ -78,8 +83,8 @@ export default function CrossChainMessageForm() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!isConnected) {
-      setError('Please connect your wallet first');
+    if (!canSubmit) {
+      setError('Please connect your wallet or enable local testing mode');
       return;
     }
 
@@ -94,7 +99,23 @@ export default function CrossChainMessageForm() {
     setError(null);
 
     try {
-      const result = await sendMessage(normalizedChainId, messageType, payload);
+      let result;
+
+      if (isConnected) {
+        // Use wallet connection for mutations
+        result = await sendMessage(normalizedChainId, messageType, payload);
+      } else if (localMode) {
+        // Use direct HTTP mutation for local testing
+        console.log('[LocalMode] Sending message via direct HTTP...');
+        const response = await sendMessageDirect(normalizedChainId, messageType, payload);
+        result = {
+          success: true,
+          messageId: response.sendCrossChainMessage || `msg_${Date.now()}`,
+          timestamp: new Date().toISOString(),
+        };
+      } else {
+        result = { success: false, error: 'No connection method available' };
+      }
 
       if (result.success) {
         console.log('Message sent successfully:', result);
@@ -133,13 +154,13 @@ export default function CrossChainMessageForm() {
         Send Cross-Chain Message
       </h2>
 
-      {/* Wallet not connected prompt */}
-      {!isConnected && (
-        <div className="mb-4 p-4 bg-yellow-500/10 border border-yellow-500/30 rounded-lg flex items-center space-x-3">
-          <Wallet className="h-5 w-5 text-yellow-400 flex-shrink-0" />
+      {/* Local testing mode indicator */}
+      {localMode && !isConnected && (
+        <div className="mb-4 p-4 bg-green-500/10 border border-green-500/30 rounded-lg flex items-center space-x-3">
+          <TestTube className="h-5 w-5 text-green-400 flex-shrink-0" />
           <div>
-            <p className="text-yellow-300 font-medium text-sm">Wallet Required</p>
-            <p className="text-yellow-400/70 text-xs">Connect your wallet to send cross-chain messages</p>
+            <p className="text-green-300 font-medium text-sm">Local Testing Mode</p>
+            <p className="text-green-400/70 text-xs">Connected to local Linera network. Messages will be sent directly via HTTP.</p>
           </div>
         </div>
       )}
@@ -179,7 +200,7 @@ export default function CrossChainMessageForm() {
             onChange={handleChainIdChange}
             placeholder="e476187f6ddfeb9d588c7b45d3df334d5501d6499b3f9ad5595cae86cce16a65"
             required
-            disabled={!isConnected}
+            disabled={!canSubmit}
             className={`w-full px-4 py-2 bg-gray-900/50 border rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500 font-mono text-sm disabled:opacity-50 disabled:cursor-not-allowed ${
               targetChain && !isValidChainId(targetChain)
                 ? 'border-yellow-500'
@@ -197,15 +218,15 @@ export default function CrossChainMessageForm() {
                 </span>
               )}
             </div>
-            {isConnected && myChainId && (
+            {(isConnected && myChainId) || localMode ? (
               <button
                 type="button"
-                onClick={() => setTargetChain(myChainId)}
+                onClick={() => setTargetChain(myChainId || process.env.NEXT_PUBLIC_CHAIN_ID || '')}
                 className="text-xs text-purple-400 hover:text-purple-300 underline"
               >
-                Use my chain (for testing)
+                Use configured chain (for testing)
               </button>
-            )}
+            ) : null}
           </div>
         </div>
 
@@ -228,7 +249,7 @@ export default function CrossChainMessageForm() {
                     setMessageType(type.type);
                   }
                 }}
-                disabled={!isConnected}
+                disabled={!canSubmit}
                 className={`p-3 rounded-lg border transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
                   (type.type === 'custom' && isCustomType) || (!isCustomType && messageType === type.type)
                     ? 'bg-purple-600/30 border-purple-500 text-purple-200'
@@ -253,7 +274,7 @@ export default function CrossChainMessageForm() {
               value={messageType}
               onChange={(e) => setMessageType(e.target.value)}
               placeholder="Enter custom message type (e.g., my_custom_event)"
-              disabled={!isConnected}
+              disabled={!canSubmit}
               className="w-full px-4 py-2 bg-gray-900/50 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500 disabled:opacity-50 disabled:cursor-not-allowed"
             />
           </div>
@@ -271,7 +292,7 @@ export default function CrossChainMessageForm() {
             placeholder='{"data": "your message here", "timestamp": "2024-01-15"}'
             rows={4}
             required
-            disabled={!isConnected}
+            disabled={!canSubmit}
             className="w-full px-4 py-2 bg-gray-900/50 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500 font-mono text-sm disabled:opacity-50 disabled:cursor-not-allowed"
           />
         </div>
@@ -279,7 +300,7 @@ export default function CrossChainMessageForm() {
         {/* Submit Button */}
         <button
           type="submit"
-          disabled={loading || !targetChain || !messageType || !payload || !isConnected}
+          disabled={loading || !targetChain || !messageType || !payload || !canSubmit}
           className="w-full px-6 py-3 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 disabled:from-gray-600 disabled:to-gray-600 text-white font-semibold rounded-lg transition-all duration-200 disabled:cursor-not-allowed flex items-center justify-center gap-2"
         >
           {loading ? (
@@ -287,13 +308,11 @@ export default function CrossChainMessageForm() {
               <Loader2 className="h-5 w-5 animate-spin" />
               <span>Sending Message...</span>
             </>
-          ) : !isConnected ? (
-            <>
-              <Wallet className="h-5 w-5" />
-              <span>Connect Wallet to Send</span>
-            </>
           ) : (
-            <span>🚀 Send Cross-Chain Message</span>
+            <>
+              {localMode && !isConnected && <TestTube className="h-5 w-5" />}
+              <span>Send Cross-Chain Message</span>
+            </>
           )}
         </button>
       </form>
@@ -302,7 +321,12 @@ export default function CrossChainMessageForm() {
       <div className="mt-4 p-3 bg-purple-500/10 border border-purple-500/30 rounded-lg">
         <p className="text-purple-300 text-sm">
           💡 <strong>How it works:</strong> Your message is sent from this chain to the target chain using Linera's
-          cross-chain messaging protocol. The target chain will receive and process it asynchronously.
+          cross-chain messaging protocol.
+          {localMode && !isConnected ? (
+            <span> Running in <strong>local testing mode</strong> - messages are sent directly to your local network.</span>
+          ) : (
+            <span> The target chain will receive and process it asynchronously.</span>
+          )}
         </p>
       </div>
 
