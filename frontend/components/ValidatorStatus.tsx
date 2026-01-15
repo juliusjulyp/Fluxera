@@ -3,11 +3,12 @@
 /**
  * VALIDATOR STATUS COMPONENT
  *
- * Displays the health and status of Conway testnet validators.
+ * Displays the health and status of network validators.
  * Uses the Linera faucet API to check validator availability.
  */
 
 import { useState, useEffect, useCallback } from 'react';
+import { isLocalTestingMode } from '@/lib/public-client';
 import {
   Server,
   CheckCircle,
@@ -19,7 +20,7 @@ import {
   Globe,
 } from 'lucide-react';
 
-// Known Conway testnet validators (from the error logs we've seen)
+// Known testnet validators (used when connected to Conway testnet)
 const CONWAY_VALIDATORS = [
   { name: 'BrightlyStake', url: 'https://linera-testnet.brightlystake.com:443' },
   { name: 'ContributionDAO', url: 'https://linera-testnet-validator.contributiondao.com:443' },
@@ -159,7 +160,7 @@ export default function ValidatorStatus() {
           </div>
           <div>
             <h3 className="text-lg font-semibold text-white">Validator Network</h3>
-            <p className="text-xs text-gray-400">Conway Testnet Infrastructure</p>
+            <p className="text-xs text-gray-400">{isLocalTestingMode() ? "Local Network Infrastructure" : "Conway Testnet Infrastructure"}</p>
           </div>
         </div>
 

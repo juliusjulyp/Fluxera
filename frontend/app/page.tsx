@@ -10,7 +10,7 @@
  * DATA FLOW:
  * Public hooks (useAnalyticsSummary, useRecentEvents, etc.)
  *   ↓
- * Public client fetches from Conway testnet GraphQL endpoint
+ * Public client fetches from Linera GraphQL endpoint (local or testnet)
  *   ↓
  * Fluxera WASM app processes queries
  *   ↓
@@ -31,7 +31,10 @@ import {
 } from "@/hooks/useFluxera";
 import { useWallet } from "@/components/providers/LineraProvider";
 import { LINERA_CONFIG } from "@/lib/linera-config";
-import { getQueryChainId } from "@/lib/public-client";
+import { getQueryChainId, isLocalTestingMode } from "@/lib/public-client";
+
+// Helper to get network name based on mode
+const getNetworkName = () => isLocalTestingMode() ? "Local Network" : "Conway Testnet";
 import EventTrackingForm from "@/components/EventTrackingForm";
 import CrossChainMessageForm from "@/components/CrossChainMessageForm";
 import EventsTable from "@/components/EventsTable";
@@ -72,7 +75,7 @@ export default function Dashboard() {
             <div>
               <p className="font-semibold">Unable to connect to Fluxera</p>
               <p className="text-sm">
-                Make sure the Fluxera app is deployed on Conway testnet and CHAIN_ID/APP_ID are configured in .env.local
+                Make sure the Fluxera app is deployed and CHAIN_ID/APP_ID are configured in .env.local
               </p>
             </div>
           </div>
@@ -108,7 +111,7 @@ export default function Dashboard() {
             </div>
             <div className="flex items-center space-x-2 text-xs text-blue-400">
               <div className="h-2 w-2 rounded-full bg-blue-500 animate-pulse" />
-              <span>Conway Testnet</span>
+              <span>{getNetworkName()}</span>
             </div>
           </div>
         )}
@@ -320,7 +323,7 @@ export default function Dashboard() {
                   <div className={`h-2 w-2 rounded-full ${summaryError ? 'bg-red-500' : 'bg-green-500 animate-pulse'}`}></div>
                   <div>
                     <p className="text-sm font-medium">Network</p>
-                    <p className="text-xs text-gray-400">Conway Testnet</p>
+                    <p className="text-xs text-gray-400">{getNetworkName()}</p>
                   </div>
                 </div>
                 <div className="text-right">
@@ -399,7 +402,7 @@ export default function Dashboard() {
         {/* FOOTER INFO */}
         <div className="mt-6 text-center text-sm text-gray-500">
           <p>
-            Powered by Fluxera • Running on Linera Protocol (Conway Testnet) •
+            Powered by Fluxera • Running on Linera Protocol ({getNetworkName()}) •
             <a href="https://linera.io" target="_blank" rel="noopener noreferrer" className="ml-1 text-blue-400 hover:text-blue-300">
               Learn more →
             </a>

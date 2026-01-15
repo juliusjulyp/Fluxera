@@ -1,5 +1,15 @@
 # Fluxera - Linera Data Availability & Indexing Layer
 
+## 📋 Latest Updates (Wave 5 Submission)
+
+- ✅ **Docker Compose** - One command to run everything: `docker compose up --force-recreate`
+- ✅ **Fixed Dependencies** - Using `linera-sdk = "0.15.8"` from crates.io (not local paths)
+- ✅ **Local Testing Mode** - Test all features without wallet connection
+- ✅ **Dynamic Network Detection** - UI automatically shows "Local Network" vs "Conway Testnet"
+- ✅ **Fully Testable Demo** - Frontend accessible at http://localhost:5173
+
+---
+
 ## 🌟 Empowering the Next Generation of Scalable Web3 Applications
 
 Fluxera is the comprehensive data infrastructure and indexing layer for [Linera](https://linera.io), the breakthrough blockchain protocol that achieves unlimited horizontal scaling through **microchains** - lightweight, parallel chains that enable instant finality (<0.5s) and unlimited throughput.
@@ -55,9 +65,11 @@ This will:
 
 **What you can do:**
 - View real-time blockchain statistics
-- Connect a session wallet (auto-funded by faucet)
-- Track custom analytics events on-chain
+- Track custom analytics events on-chain (Local Testing Mode - no wallet needed!)
 - Send cross-chain messages between microchains
+- Connect a session wallet (auto-funded by faucet) for authenticated operations
+
+**Note:** The frontend automatically detects when running locally and enables "Local Testing Mode" which allows you to test all features without connecting a wallet.
 
 **Stop everything:**
 ```bash
@@ -665,4 +677,40 @@ cargo run -- --test-connection --service-url http://localhost:8080
 - **Cross-Application Analytics:** AI-driven insights across the entire Linera application ecosystem
 - **Predictive Microchain Spawning:** ML models to predict optimal microchain creation patterns
 - **Decentralized Indexer Network:** Distributed indexing across multiple nodes with economic incentives
+
+---
+
+## 📝 Changelog
+
+### Wave 5 (January 2026)
+**Theme: Testability & Docker Integration**
+
+- ✅ Added `docker-compose.yaml` with full stack deployment
+- ✅ Fixed `Cargo.toml` to use `linera-sdk = "0.15.8"` from crates.io (not local paths)
+- ✅ Implemented Local Testing Mode for wallet-free testing
+- ✅ Dynamic network name display (Local Network vs Conway Testnet)
+- ✅ Cross-chain message form with chain ID validation
+- ✅ Event tracking form with local mode support
+- ✅ Comprehensive `run.bash` build and deployment script
+- ✅ Frontend auto-detects local vs testnet environment
+
+### Previous Waves
+- **Wave 4:** Multi-wallet support (CheCko, Croissant, Session), React hooks library
+- **Wave 3:** GraphQL API planning, performance optimization design
+- **Wave 2:** Cross-chain messaging, real-time polling, frontend dashboard
+- **Wave 1:** MVP indexer, SQLite storage, REST API, core architecture
+
+---
+
+## 👥 Team
+
+**Fluxera Team**
+- Discord: [Your Discord Username]
+- Wallet Address: [Your Wallet Address]
+
+---
+
+## 📄 License
+
+This project is open source under the MIT License.
 

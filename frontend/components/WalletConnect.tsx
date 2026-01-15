@@ -241,11 +241,11 @@ export default function WalletConnect() {
               <div className="bg-gray-900/50 rounded-lg p-3">
                 <div className="flex items-center justify-between mb-1">
                   <p className="text-xs text-gray-500 uppercase tracking-wide">Network</p>
-                  <CopyButton text="Conway Testnet" label="network" />
+                  <CopyButton text={isLocalTestingMode() ? "Local Network" : "Conway Testnet"} label="network" />
                 </div>
                 <div className="flex items-center space-x-2">
                   <div className={`h-2 w-2 rounded-full ${statusColor}`} />
-                  <p className="text-sm text-white">Conway Testnet</p>
+                  <p className="text-sm text-white">{isLocalTestingMode() ? "Local Network" : "Conway Testnet"}</p>
                   <span className={`px-2 py-0.5 text-xs rounded-full ${
                     networkStatus === 'connected'
                       ? 'bg-green-900/50 text-green-400'
@@ -275,7 +275,7 @@ export default function WalletConnect() {
                     `Wallet Type: ${walletType}`,
                     `Address: ${fullAddress || address}`,
                     `Chain ID: ${chainId}`,
-                    `Network: Conway Testnet`,
+                    `Network: ${isLocalTestingMode() ? "Local Network" : "Conway Testnet"}`,
                     `Status: ${networkStatus}`,
                     `Connected At: ${connectedAt ? new Date(connectedAt).toISOString() : 'Unknown'}`,
                   ].join('\n');
