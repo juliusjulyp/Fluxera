@@ -12,11 +12,43 @@ export const LINERA_CONFIG = {
   // Linera service URL for public queries - local by default
   SERVICE_URL: process.env.NEXT_PUBLIC_LINERA_SERVICE || 'http://localhost:8081',
 
-  // Chain ID where Fluxera is deployed (set dynamically by run.bash)
+  // Fluxera Indexer API URL (REST + WebSocket)
+  INDEXER_URL: process.env.NEXT_PUBLIC_INDEXER_URL || 'http://localhost:3001',
+
+  // Fluxera Indexer WebSocket URL
+  INDEXER_WS_URL: process.env.NEXT_PUBLIC_INDEXER_WS_URL || 'ws://localhost:3001/ws',
+
+  // Primary chain ID where Fluxera is deployed (set dynamically by run.bash)
   CHAIN_ID: process.env.NEXT_PUBLIC_CHAIN_ID || '',
 
   // Fluxera application ID (set dynamically by run.bash)
   APP_ID: process.env.NEXT_PUBLIC_APP_ID || '',
+
+  // === Wave 6: Multi-Chain Configuration ===
+
+  // Additional chain IDs (set dynamically by run.bash)
+  CHAIN_2_ID: process.env.NEXT_PUBLIC_CHAIN_2_ID || '',
+  CHAIN_3_ID: process.env.NEXT_PUBLIC_CHAIN_3_ID || '',
+
+  // All configured chains as array (parsed from comma-separated env var)
+  ALL_CHAINS: (process.env.NEXT_PUBLIC_ALL_CHAINS || '')
+    .split(',')
+    .filter(Boolean)
+    .map((c) => c.trim()),
+
+  // Get list of all configured chain IDs
+  getConfiguredChains: (): string[] => {
+    const allChains = process.env.NEXT_PUBLIC_ALL_CHAINS;
+    if (allChains) {
+      return allChains.split(',').filter(Boolean).map((c) => c.trim());
+    }
+    // Fallback to individual env vars
+    return [
+      process.env.NEXT_PUBLIC_CHAIN_ID,
+      process.env.NEXT_PUBLIC_CHAIN_2_ID,
+      process.env.NEXT_PUBLIC_CHAIN_3_ID,
+    ].filter(Boolean) as string[];
+  },
 
   // Storage keys for wallet persistence
   STORAGE_KEYS: {

@@ -22,6 +22,12 @@ pub enum Operation {
         message_type: String,
         payload: String,
     },
+
+    /// Register a chain in the Fluxera network (Wave 6)
+    RegisterChain {
+        chain_id: String,
+        name: String,
+    },
 }
 
 /// Cross-chain messages that can be sent between Fluxera instances
@@ -33,6 +39,8 @@ pub enum Message {
         data: String,
         source_chain: String,
         timestamp: String,
+        /// Original message ID for acknowledgment (Wave 6)
+        message_id: Option<String>,
     },
 
     /// Request for chain metrics
@@ -44,6 +52,24 @@ pub enum Message {
     MetricsResponse {
         total_events: u64,
         unique_users: usize,
+    },
+
+    /// Delivery acknowledgment from target chain (Wave 6)
+    DeliveryAck {
+        /// The message ID being acknowledged
+        message_id: String,
+        /// When the message was delivered
+        delivered_at: String,
+        /// The chain that received the message
+        receiving_chain: String,
+    },
+
+    /// Chain announcement for discovery (Wave 6)
+    ChainAnnounce {
+        /// The chain announcing itself
+        chain_id: String,
+        /// Human-readable name
+        name: String,
     },
 }
 

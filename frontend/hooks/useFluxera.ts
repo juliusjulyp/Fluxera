@@ -448,11 +448,39 @@ export function truncateAddress(address: string, chars: number = 6): string {
 
 /**
  * Format timestamp to relative time
- * "2024-01-01T00:00:00Z" → "5s ago"
+ * Handles multiple formats:
+ * - "2024-01-01T00:00:00Z" (ISO)
+ * - "2024-01-01 00:00:00.123456" (Linera blockchain format)
  */
 export function formatRelativeTime(timestamp: string): string {
+  if (!timestamp) return 'unknown';
+
   const now = Date.now();
-  const time = new Date(timestamp).getTime();
+
+  // Normalize timestamp format from blockchain (space to T, add Z for UTC)
+  // Blockchain format: "2026-01-30 15:48:50.308781"
+  // ISO format: "2026-01-30T15:48:50.308781Z"
+  let normalizedTimestamp = timestamp;
+  if (timestamp.includes(' ') && !timestamp.includes('T')) {
+    // Replace space with T and add Z for UTC
+    normalizedTimestamp = timestamp.replace(' ', 'T');
+    // Truncate microseconds to milliseconds (JS only supports ms)
+    if (normalizedTimestamp.includes('.')) {
+      const [main, frac] = normalizedTimestamp.split('.');
+      normalizedTimestamp = `${main}.${frac.substring(0, 3)}Z`;
+    } else {
+      normalizedTimestamp += 'Z';
+    }
+  }
+
+  const time = new Date(normalizedTimestamp).getTime();
+
+  // Check if parsing failed
+  if (isNaN(time)) {
+    console.warn('[formatRelativeTime] Failed to parse timestamp:', timestamp);
+    return 'just now';
+  }
+
   const diff = Math.floor((now - time) / 1000);
 
   if (diff < 0) return 'just now';
@@ -487,4 +515,279 @@ export function getEventTypeColor(eventType: string): string {
     transaction: 'bg-indigo-500',
   };
   return colors[eventType] || 'bg-gray-500';
+}
+
+// ============================================
+// WAVE 6: MESSAGE STATUS TRACKING
+// ============================================
+
+import { publicQuery } from '@/lib/public-client';
+import type {
+  MessageStatus,
+  CrossChainMessageV2,
+  RegisteredChain,
+} from '@/types/fluxera';
+import { normalizeMessageStatus } from '@/types/fluxera';
+
+/**
+ * Fetch a single message's status by ID
+ * Polls until message is delivered or failed
+ *
+ * @param messageId - The message ID to track
+ * @param pollInterval - How often to poll (default: 3000ms)
+ *
+ * @example
+ * function MessageStatusTracker({ messageId }) {
+ *   const { status, message, loading } = useMessageStatus(messageId);
+ *   return <StatusBadge status={status} deliveredAt={message?.deliveredAt} />;
+ * }
+ */
+export function useMessageStatus(
+  messageId: string | null,
+  pollInterval: number = 3000
+) {
+  const [status, setStatus] = useState<MessageStatus | null>(null);
+  const [message, setMessage] = useState<CrossChainMessageV2 | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<Error | null>(null);
+
+  const { query: authQuery, isConnected } = useAuthenticatedQuery();
+
+  const refresh = useCallback(async () => {
+    if (!messageId) return;
+
+    setLoading(true);
+    try {
+      let data;
+
+      if (isConnected && authQuery) {
+        // Use authenticated query
+        const graphqlQuery = `query { messageStatus(messageId: "${messageId}") { messageId status deliveredAt sourceChain targetChain messageType sentAt payload } }`;
+        const result = await authQuery(graphqlQuery);
+        data = { messageStatus: result?.messageStatus || null };
+      } else {
+        // Fall back to public HTTP query
+        data = await publicQuery<{ messageStatus: CrossChainMessageV2 | null }>(`
+          query {
+            messageStatus(messageId: "${messageId}") {
+              messageId
+              status
+              deliveredAt
+              sourceChain
+              targetChain
+              messageType
+              sentAt
+              payload
+            }
+          }
+        `);
+      }
+
+      if (data.messageStatus) {
+        setMessage(data.messageStatus);
+        setStatus(data.messageStatus.status);
+      }
+      setError(null);
+    } catch (err) {
+      console.error('[useMessageStatus] Error:', err);
+      setError(err instanceof Error ? err : new Error('Failed to fetch status'));
+    } finally {
+      setLoading(false);
+    }
+  }, [messageId, isConnected, authQuery]);
+
+  useEffect(() => {
+    if (!messageId) {
+      setStatus(null);
+      setMessage(null);
+      return;
+    }
+
+    refresh();
+
+    // Poll for status updates if not delivered/failed
+    if (status !== 'Delivered' && status !== 'Failed') {
+      const interval = setInterval(refresh, pollInterval);
+      return () => clearInterval(interval);
+    }
+  }, [messageId, status, pollInterval, refresh]);
+
+  return { status, message, loading, error, refresh };
+}
+
+/**
+ * Fetch messages with status information (V2 messages)
+ *
+ * @param limit - Number of messages to fetch
+ * @param refreshInterval - Auto-refresh interval (default: 5000)
+ *
+ * @example
+ * function MessageList() {
+ *   const { messages, loading } = useMessagesWithStatus(20);
+ *   return messages.map(m => <MessageCard key={m.messageId} message={m} />);
+ * }
+ */
+export function useMessagesWithStatus(
+  limit: number = 20,
+  refreshInterval: number = 5000
+) {
+  const [messages, setMessages] = useState<CrossChainMessageV2[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
+
+  const { query: authQuery, isConnected } = useAuthenticatedQuery();
+
+  const refresh = useCallback(async () => {
+    try {
+      let data;
+
+      if (isConnected && authQuery) {
+        const graphqlQuery = `query { messagesWithStatus(limit: ${limit}) { messageId status deliveredAt sourceChain targetChain messageType sentAt payload } }`;
+        const result = await authQuery(graphqlQuery);
+        data = { messagesWithStatus: result?.messagesWithStatus || [] };
+      } else {
+        data = await publicQuery<{ messagesWithStatus: CrossChainMessageV2[] }>(`
+          query {
+            messagesWithStatus(limit: ${limit}) {
+              messageId
+              status
+              deliveredAt
+              sourceChain
+              targetChain
+              messageType
+              sentAt
+              payload
+            }
+          }
+        `);
+      }
+
+      setMessages(data.messagesWithStatus || []);
+      setError(null);
+    } catch (err) {
+      console.error('[useMessagesWithStatus] Error:', err);
+      setError(err instanceof Error ? err : new Error('Failed to fetch messages'));
+    } finally {
+      setLoading(false);
+    }
+  }, [limit, isConnected, authQuery]);
+
+  useEffect(() => {
+    refresh();
+
+    if (refreshInterval > 0) {
+      const interval = setInterval(refresh, refreshInterval);
+      return () => clearInterval(interval);
+    }
+  }, [refresh, refreshInterval]);
+
+  return { messages, loading, error, refresh };
+}
+
+/**
+ * Fetch all registered Fluxera chains
+ *
+ * @param refreshInterval - Auto-refresh interval (default: 30000)
+ *
+ * @example
+ * function ChainRegistry() {
+ *   const { chains, loading } = useRegisteredChains();
+ *   return chains.map(c => <ChainCard key={c.chainId} chain={c} />);
+ * }
+ */
+export function useRegisteredChains(refreshInterval: number = 30000) {
+  const [chains, setChains] = useState<RegisteredChain[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
+
+  const { query: authQuery, isConnected } = useAuthenticatedQuery();
+
+  const refresh = useCallback(async () => {
+    try {
+      let data;
+
+      if (isConnected && authQuery) {
+        const graphqlQuery = `query { registeredChains { chainId name registeredAt lastActivity messagesSent messagesReceived } }`;
+        const result = await authQuery(graphqlQuery);
+        data = { registeredChains: result?.registeredChains || [] };
+      } else {
+        data = await publicQuery<{ registeredChains: RegisteredChain[] }>(`
+          query {
+            registeredChains {
+              chainId
+              name
+              registeredAt
+              lastActivity
+              messagesSent
+              messagesReceived
+            }
+          }
+        `);
+      }
+
+      setChains(data.registeredChains || []);
+      setError(null);
+    } catch (err) {
+      console.error('[useRegisteredChains] Error:', err);
+      setError(err instanceof Error ? err : new Error('Failed to fetch chains'));
+    } finally {
+      setLoading(false);
+    }
+  }, [isConnected, authQuery]);
+
+  useEffect(() => {
+    refresh();
+
+    if (refreshInterval > 0) {
+      const interval = setInterval(refresh, refreshInterval);
+      return () => clearInterval(interval);
+    }
+  }, [refresh, refreshInterval]);
+
+  return { chains, loading, error, refresh };
+}
+
+/**
+ * Get status badge styling
+ * Handles both uppercase (from API) and capitalized status values
+ */
+export function getStatusBadgeStyle(status: MessageStatus | string | undefined | null): {
+  bgColor: string;
+  textColor: string;
+  borderColor: string;
+  label: string;
+} {
+  // Normalize status to handle API returning UPPERCASE
+  const normalizedStatus = normalizeMessageStatus(status as string);
+
+  switch (normalizedStatus) {
+    case 'Sent':
+      return {
+        bgColor: 'bg-blue-500/20',
+        textColor: 'text-blue-400',
+        borderColor: 'border-blue-500/50',
+        label: 'Sent',
+      };
+    case 'Delivered':
+      return {
+        bgColor: 'bg-green-500/20',
+        textColor: 'text-green-400',
+        borderColor: 'border-green-500/50',
+        label: 'Delivered',
+      };
+    case 'Failed':
+      return {
+        bgColor: 'bg-red-500/20',
+        textColor: 'text-red-400',
+        borderColor: 'border-red-500/50',
+        label: 'Failed',
+      };
+    default:
+      return {
+        bgColor: 'bg-gray-500/20',
+        textColor: 'text-gray-400',
+        borderColor: 'border-gray-500/50',
+        label: 'Unknown',
+      };
+  }
 }

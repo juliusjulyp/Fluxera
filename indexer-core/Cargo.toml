@@ -14,20 +14,20 @@ path = "src/main.rs"
 tokio = { version = "1.0", features = ["full"] }
 
 # Linera integration
-linera-client = "0.15"
-linera-sdk = "0.15.3"
-linera-base = "0.15"
-linera-execution = "0.15"
+linera-client = "0.15.8"
+linera-sdk = "0.15.8"
+linera-base = "0.15.8"
+linera-execution = "0.15.8"
 
 # BCS serialization (used by Linera)
 bcs = "0.1"
 
 # Web framework for REST API
-axum = { version = "0.7", features = ["macros", "ws"] }
-tower-http = { version = "0.5", features = ["cors"] }
+axum = { version = "0.8", features = ["macros", "ws"] }
+tower-http = { version = "0.6", features = ["cors"] }
 
 # Database
-sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "sqlite", "postgres", "macros", "chrono", "uuid"] }
+sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "sqlite", "postgres", "macros", "chrono", "uuid"] }
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
@@ -50,3 +50,7 @@ hex = "0.4"
 futures = "0.3"
 tokio-stream = "0.1"
 chrono = "0.4"
+
+# GraphQL API
+async-graphql = { version = "7.0", features = ["chrono"] }
+async-graphql-axum = "7.0"

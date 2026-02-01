@@ -10,7 +10,10 @@ use linera_sdk::{
     views::View,
     Service, ServiceRuntime,
 };
-use state::{AnalyticsEvent, ChainMetrics, CrossChainMessage, FluxeraState};
+use state::{
+    AnalyticsEvent, ChainMetrics, CrossChainMessage, CrossChainMessageV2, FluxeraState,
+    MessageStatus, RegisteredChain,
+};
 use std::sync::Arc;
 
 #[derive(Clone)]
@@ -223,6 +226,96 @@ impl FluxeraService {
             }
         }
         messages
+    }
+
+    // === Wave 6: Multi-Chain Support Queries ===
+
+    /// Get message status by ID
+    async fn message_status(&self, message_id: String) -> Option<CrossChainMessageV2> {
+        self.state
+            .messages_v2
+            .get(&message_id)
+            .await
+            .ok()
+            .flatten()
+    }
+
+    /// Get all messages with status (paginated)
+    async fn messages_with_status(
+        &self,
+        offset: Option<usize>,
+        limit: Option<usize>,
+    ) -> Vec<CrossChainMessageV2> {
+        let offset = offset.unwrap_or(0);
+        let limit = limit.unwrap_or(100);
+        let keys = self.state.messages_v2.indices().await.unwrap_or_default();
+
+        let mut messages = Vec::new();
+        for (i, message_id) in keys.iter().enumerate() {
+            if i < offset {
+                continue;
+            }
+            if messages.len() >= limit {
+                break;
+            }
+            if let Ok(Some(message)) = self.state.messages_v2.get(message_id).await {
+                messages.push(message);
+            }
+        }
+        messages
+    }
+
+    /// Get all pending (non-delivered) messages
+    async fn pending_messages(&self) -> Vec<CrossChainMessageV2> {
+        let keys = self.state.messages_v2.indices().await.unwrap_or_default();
+
+        let mut messages = Vec::new();
+        for message_id in keys {
+            if let Ok(Some(message)) = self.state.messages_v2.get(&message_id).await {
+                if message.status != MessageStatus::Delivered {
+                    messages.push(message);
+                }
+            }
+        }
+        messages
+    }
+
+    /// Get messages by status
+    async fn messages_by_status(&self, status: MessageStatus) -> Vec<CrossChainMessageV2> {
+        let keys = self.state.messages_v2.indices().await.unwrap_or_default();
+
+        let mut messages = Vec::new();
+        for message_id in keys {
+            if let Ok(Some(message)) = self.state.messages_v2.get(&message_id).await {
+                if message.status == status {
+                    messages.push(message);
+                }
+            }
+        }
+        messages
+    }
+
+    /// Get all registered chains
+    async fn registered_chains(&self) -> Vec<RegisteredChain> {
+        let keys = self.state.registered_chains.indices().await.unwrap_or_default();
+
+        let mut chains = Vec::new();
+        for chain_id in keys {
+            if let Ok(Some(chain)) = self.state.registered_chains.get(&chain_id).await {
+                chains.push(chain);
+            }
+        }
+        chains
+    }
+
+    /// Get a specific registered chain
+    async fn registered_chain(&self, chain_id: String) -> Option<RegisteredChain> {
+        self.state
+            .registered_chains
+            .get(&chain_id)
+            .await
+            .ok()
+            .flatten()
     }
 }
 

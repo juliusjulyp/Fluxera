@@ -8,7 +8,10 @@ use linera_sdk::{
     views::{RootView, View},
     Contract, ContractRuntime,
 };
-use state::{AnalyticsEvent, ChainMetrics, CrossChainMessage, FluxeraState};
+use state::{
+    AnalyticsEvent, ChainMetrics, CrossChainMessage, CrossChainMessageV2, FluxeraState,
+    MessageStatus, RegisteredChain,
+};
 
 pub struct FluxeraContract {
     state: FluxeraState,
@@ -52,6 +55,9 @@ impl Contract for FluxeraContract {
                 self.send_cross_chain_message(target_chain, message_type, payload)
                     .await
             }
+            Operation::RegisterChain { chain_id, name } => {
+                self.register_chain(chain_id, name).await
+            }
         }
     }
 
@@ -62,8 +68,9 @@ impl Contract for FluxeraContract {
                 data,
                 source_chain,
                 timestamp,
+                message_id,
             } => {
-                self.handle_cross_chain_event(event_type, data, source_chain, timestamp)
+                self.handle_cross_chain_event(event_type, data, source_chain, timestamp, message_id)
                     .await;
             }
             Message::MetricsRequest { requesting_chain } => {
@@ -75,6 +82,17 @@ impl Contract for FluxeraContract {
             } => {
                 self.handle_metrics_response(total_events, unique_users)
                     .await;
+            }
+            Message::DeliveryAck {
+                message_id,
+                delivered_at,
+                receiving_chain,
+            } => {
+                self.handle_delivery_ack(message_id, delivered_at, receiving_chain)
+                    .await;
+            }
+            Message::ChainAnnounce { chain_id, name } => {
+                self.handle_chain_announce(chain_id, name).await;
             }
         }
     }
@@ -160,7 +178,7 @@ impl FluxeraContract {
             .parse()
             .expect("Invalid target chain ID");
 
-        // Create message record
+        // Create legacy message record (backward compatibility)
         let message_record = CrossChainMessage {
             message_id: message_id.clone(),
             source_chain: source_chain.clone(),
@@ -170,29 +188,51 @@ impl FluxeraContract {
             payload: payload.clone(),
         };
 
-        // Store message record
+        // Store legacy message record
         self.state.cross_chain_messages.push(message_record);
+
+        // Create enhanced message record with status (Wave 6)
+        let message_v2 = CrossChainMessageV2 {
+            message_id: message_id.clone(),
+            source_chain: source_chain.clone(),
+            target_chain: target_chain.clone(),
+            message_type: message_type.clone(),
+            sent_at: timestamp.clone(),
+            payload: payload.clone(),
+            status: MessageStatus::Sent,
+            delivered_at: None,
+        };
+
+        // Store in messages_v2 map for status tracking
+        self.state
+            .messages_v2
+            .insert(&message_id, message_v2)
+            .expect("Failed to store message");
+
+        // Track as pending message
+        self.state.pending_message_ids.push(message_id.clone());
 
         self.state.total_messages.set(message_count + 1);
 
-        // Send the message
+        // Send the message with tracking enabled for bounce detection
         let message = Message::CrossChainEvent {
             event_type: message_type.clone(),
             data: payload,
             source_chain,
             timestamp: timestamp.clone(),
+            message_id: Some(message_id.clone()),
         };
 
         self.runtime
             .prepare_message(message)
+            .with_tracking()
             .send_to(target_chain_id);
-
-        // Message recorded on-chain
 
         // Return success response
         serde_json::json!({
             "success": true,
             "message_id": message_id,
+            "status": "sent",
             "timestamp": timestamp
         })
         .to_string()
@@ -205,10 +245,12 @@ impl FluxeraContract {
         data: String,
         source_chain: String,
         timestamp: String,
+        message_id: Option<String>,
     ) {
         let chain_id = self.runtime.chain_id().to_string();
         let event_count = *self.state.total_event_count.get();
         let event_id = format!("{}-xchain-{}", chain_id, event_count);
+        let delivered_at = self.runtime.system_time().to_string();
 
         // Create event for cross-chain activity
         let event = AnalyticsEvent {
@@ -227,7 +269,29 @@ impl FluxeraContract {
         // Update metrics
         self.update_chain_metrics(&chain_id, &event_type).await;
 
-        // Cross-chain message processed
+        // Update registered chain activity if it exists
+        if let Ok(Some(mut registered)) = self.state.registered_chains.get(&source_chain).await {
+            registered.messages_received += 1;
+            registered.last_activity = Some(delivered_at.clone());
+            let _ = self.state.registered_chains.insert(&source_chain, registered);
+        }
+
+        // Send delivery acknowledgment back to source chain (Wave 6)
+        if let Some(msg_id) = message_id {
+            let ack_message = Message::DeliveryAck {
+                message_id: msg_id,
+                delivered_at,
+                receiving_chain: chain_id,
+            };
+
+            let source_chain_id = source_chain
+                .parse()
+                .expect("Invalid source chain ID");
+
+            self.runtime
+                .prepare_message(ack_message)
+                .send_to(source_chain_id);
+        }
     }
 
     /// Handle metrics request from another chain
@@ -298,5 +362,81 @@ impl FluxeraContract {
             .chain_metrics
             .insert(chain_id, metrics)
             .expect("Failed to update chain metrics");
+    }
+
+    // === Wave 6: Multi-Chain Support ===
+
+    /// Handle delivery acknowledgment from target chain
+    async fn handle_delivery_ack(
+        &mut self,
+        message_id: String,
+        delivered_at: String,
+        _receiving_chain: String,
+    ) {
+        // Update message status to delivered
+        if let Ok(Some(mut message)) = self.state.messages_v2.get(&message_id).await {
+            message.status = MessageStatus::Delivered;
+            message.delivered_at = Some(delivered_at);
+            self.state
+                .messages_v2
+                .insert(&message_id, message)
+                .expect("Failed to update message status");
+        }
+    }
+
+    /// Handle chain announcement for discovery
+    async fn handle_chain_announce(&mut self, chain_id: String, name: String) {
+        let timestamp = self.runtime.system_time().to_string();
+
+        // Check if chain already registered
+        if let Ok(Some(mut existing)) = self.state.registered_chains.get(&chain_id).await {
+            // Update last activity
+            existing.last_activity = Some(timestamp);
+            self.state
+                .registered_chains
+                .insert(&chain_id, existing)
+                .expect("Failed to update chain");
+        } else {
+            // Register new chain
+            let chain = RegisteredChain {
+                chain_id: chain_id.clone(),
+                name,
+                registered_at: timestamp,
+                last_activity: None,
+                messages_sent: 0,
+                messages_received: 0,
+            };
+            self.state
+                .registered_chains
+                .insert(&chain_id, chain)
+                .expect("Failed to register chain");
+        }
+    }
+
+    /// Register a chain in the network
+    async fn register_chain(&mut self, chain_id: String, name: String) -> String {
+        let timestamp = self.runtime.system_time().to_string();
+
+        let chain = RegisteredChain {
+            chain_id: chain_id.clone(),
+            name: name.clone(),
+            registered_at: timestamp.clone(),
+            last_activity: None,
+            messages_sent: 0,
+            messages_received: 0,
+        };
+
+        self.state
+            .registered_chains
+            .insert(&chain_id, chain)
+            .expect("Failed to register chain");
+
+        serde_json::json!({
+            "success": true,
+            "chain_id": chain_id,
+            "name": name,
+            "registered_at": timestamp
+        })
+        .to_string()
     }
 }

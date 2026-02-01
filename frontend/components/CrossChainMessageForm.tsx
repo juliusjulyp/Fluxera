@@ -25,6 +25,8 @@ import { useState } from 'react';
 import { Loader2, CheckCircle, AlertCircle, MessageSquare, TestTube } from 'lucide-react';
 import { useSendMessage, useWallet } from '@/components/providers/LineraProvider';
 import { isLocalTestingMode, sendMessageDirect } from '@/lib/public-client';
+import ChainSelector from './ChainSelector';
+import { isValidChainId, normalizeChainId } from '@/lib/chain-registry';
 
 export default function CrossChainMessageForm() {
   const [targetChain, setTargetChain] = useState('');
@@ -45,34 +47,12 @@ export default function CrossChainMessageForm() {
   const canSubmit = isConnected || localMode;
 
   /**
-   * Normalize chain ID - strip 0x prefix if present
+   * Handle chain selection from ChainSelector
    */
-  const normalizeChainId = (chainId: string): string => {
-    let normalized = chainId.trim();
-    // Strip 0x or 0X prefix if present
-    if (normalized.toLowerCase().startsWith('0x')) {
-      normalized = normalized.slice(2);
-    }
-    return normalized;
-  };
-
-  /**
-   * Validate chain ID format (64 hex characters)
-   */
-  const isValidChainId = (chainId: string): boolean => {
-    const normalized = normalizeChainId(chainId);
-    return /^[a-fA-F0-9]{64}$/.test(normalized);
-  };
-
-  /**
-   * Handle chain ID input with auto-normalization
-   */
-  const handleChainIdChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = e.target.value;
-    setTargetChain(value);
-
-    // Clear error if user is typing
-    if (error?.includes('chain ID')) {
+  const handleChainSelect = (chainId: string) => {
+    setTargetChain(chainId);
+    // Clear error if user changes selection
+    if (error?.includes('chain')) {
       setError(null);
     }
   };
@@ -139,11 +119,13 @@ export default function CrossChainMessageForm() {
 
   /**
    * Message type presets
+   * Note: All types store the payload as an event on the target chain.
+   * The type is a semantic label for organizing/filtering messages.
    */
   const messageTypes = [
-    { type: 'analytics_sync', label: '📊 Analytics Sync', description: 'Sync analytics data' },
-    { type: 'event_notification', label: '🔔 Event Notification', description: 'Notify about new events' },
-    { type: 'data_request', label: '🔍 Data Request', description: 'Request data from another chain' },
+    { type: 'data_broadcast', label: '📊 Data Broadcast', description: 'Store data on target chain' },
+    { type: 'event_relay', label: '📢 Event Relay', description: 'Relay event to target chain' },
+    { type: 'chain_ping', label: '🔗 Chain Ping', description: 'Ping another chain with payload' },
     { type: 'custom', label: '⚙️ Custom', description: 'Custom message type' },
   ];
 
@@ -188,46 +170,20 @@ export default function CrossChainMessageForm() {
       )}
 
       <form onSubmit={handleSubmit} className="space-y-4">
-        {/* Target Chain Input */}
+        {/* Target Chain Selector (Wave 6) */}
         <div>
-          <label htmlFor="targetChain" className="block text-gray-300 text-sm font-medium mb-2">
-            Target Chain ID
-          </label>
-          <input
-            id="targetChain"
-            type="text"
+          <ChainSelector
             value={targetChain}
-            onChange={handleChainIdChange}
-            placeholder="e476187f6ddfeb9d588c7b45d3df334d5501d6499b3f9ad5595cae86cce16a65"
-            required
+            onChange={handleChainSelect}
+            excludeChainId={myChainId || process.env.NEXT_PUBLIC_CHAIN_ID}
+            placeholder="Select destination chain"
             disabled={!canSubmit}
-            className={`w-full px-4 py-2 bg-gray-900/50 border rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500 font-mono text-sm disabled:opacity-50 disabled:cursor-not-allowed ${
-              targetChain && !isValidChainId(targetChain)
-                ? 'border-yellow-500'
-                : 'border-gray-600'
-            }`}
+            allowCustom={true}
+            label="Target Chain"
           />
-          <div className="flex items-center justify-between mt-1">
-            <div className="flex items-start gap-2">
-              <p className="text-gray-500 text-xs">
-                Raw hex (64 chars). No "0x" prefix.
-              </p>
-              {targetChain && targetChain.toLowerCase().startsWith('0x') && (
-                <span className="text-yellow-400 text-xs">
-                  (0x will be auto-removed)
-                </span>
-              )}
-            </div>
-            {(isConnected && myChainId) || localMode ? (
-              <button
-                type="button"
-                onClick={() => setTargetChain(myChainId || process.env.NEXT_PUBLIC_CHAIN_ID || '')}
-                className="text-xs text-purple-400 hover:text-purple-300 underline"
-              >
-                Use configured chain (for testing)
-              </button>
-            ) : null}
-          </div>
+          <p className="text-gray-500 text-xs mt-1">
+            Select a known Fluxera chain or enter a custom chain ID
+          </p>
         </div>
 
         {/* Message Type Selection */}
@@ -295,6 +251,9 @@ export default function CrossChainMessageForm() {
             disabled={!canSubmit}
             className="w-full px-4 py-2 bg-gray-900/50 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500 font-mono text-sm disabled:opacity-50 disabled:cursor-not-allowed"
           />
+          <p className="text-gray-500 text-xs mt-1">
+            JSON recommended for structured data, but any text format is accepted for demo.
+          </p>
         </div>
 
         {/* Submit Button */}
@@ -320,12 +279,12 @@ export default function CrossChainMessageForm() {
       {/* Info Box */}
       <div className="mt-4 p-3 bg-purple-500/10 border border-purple-500/30 rounded-lg">
         <p className="text-purple-300 text-sm">
-          💡 <strong>How it works:</strong> Your message is sent from this chain to the target chain using Linera's
-          cross-chain messaging protocol.
+          💡 <strong>How it works:</strong> Your payload is sent to the target chain and stored as an event.
+          The message type is a label for organizing messages - all types follow the same storage flow.
           {localMode && !isConnected ? (
             <span> Running in <strong>local testing mode</strong> - messages are sent directly to your local network.</span>
           ) : (
-            <span> The target chain will receive and process it asynchronously.</span>
+            <span> Delivery is confirmed via acknowledgment from the target chain.</span>
           )}
         </p>
       </div>
@@ -335,8 +294,9 @@ export default function CrossChainMessageForm() {
         <p className="text-gray-400 text-xs mb-2">📝 Example payload:</p>
         <pre className="text-gray-300 text-xs font-mono">
 {`{
-  "event_type": "analytics_sync",
-  "events_count": 150,
+  "action": "user_activity",
+  "count": 150,
+  "source": "frontend",
   "timestamp": "${new Date().toISOString()}"
 }`}
         </pre>

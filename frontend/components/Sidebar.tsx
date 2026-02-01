@@ -7,6 +7,7 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import {
   Activity,
   BarChart3,
@@ -21,7 +22,7 @@ import {
   Home
 } from 'lucide-react';
 import { useAnalyticsSummary } from '@/hooks/useFluxera';
-import { FLUXERA_CONFIG } from '@/lib/constants';
+import { LINERA_CONFIG } from '@/lib/linera-config';
 
 interface SidebarProps {
   currentPage?: string;
@@ -32,13 +33,13 @@ export default function Sidebar({ currentPage = 'dashboard' }: SidebarProps) {
   const { summary } = useAnalyticsSummary();
 
   const menuItems = [
-    { id: 'dashboard', label: 'Dashboard', icon: Home, href: '#' },
-    { id: 'events', label: 'Events', icon: Activity, href: '#events' },
-    { id: 'analytics', label: 'Analytics', icon: BarChart3, href: '#analytics' },
-    { id: 'messages', label: 'Messages', icon: MessageSquare, href: '#messages' },
-    { id: 'chains', label: 'Chains', icon: Globe, href: '#chains' },
-    { id: 'docs', label: 'Documentation', icon: FileText, href: '#docs' },
-    { id: 'settings', label: 'Settings', icon: Settings, href: '#settings' },
+    { id: 'dashboard', label: 'Dashboard', icon: Home, href: '/' },
+    { id: 'events', label: 'Events', icon: Activity, href: '/events' },
+    { id: 'analytics', label: 'Analytics', icon: BarChart3, href: '/analytics' },
+    { id: 'messages', label: 'Messages', icon: MessageSquare, href: '/messages' },
+    { id: 'chains', label: 'Chains', icon: Globe, href: '/chains' },
+    { id: 'docs', label: 'Documentation', icon: FileText, href: '/docs' },
+    { id: 'settings', label: 'Settings', icon: Settings, href: '/settings' },
   ];
 
   const truncateAddress = (address: string, start = 6, end = 4) => {
@@ -116,7 +117,7 @@ export default function Sidebar({ currentPage = 'dashboard' }: SidebarProps) {
               const isActive = currentPage === item.id;
 
               return (
-                <a
+                <Link
                   key={item.id}
                   href={item.href}
                   className={`flex items-center space-x-3 px-3 py-2.5 rounded-lg transition-all ${
@@ -129,7 +130,7 @@ export default function Sidebar({ currentPage = 'dashboard' }: SidebarProps) {
                   {!isCollapsed && (
                     <span className="text-sm font-medium">{item.label}</span>
                   )}
-                </a>
+                </Link>
               );
             })}
           </div>
@@ -147,7 +148,7 @@ export default function Sidebar({ currentPage = 'dashboard' }: SidebarProps) {
                 </div>
               </div>
               <p className="text-xs font-mono text-gray-400">
-                {truncateAddress(summary?.chainId || FLUXERA_CONFIG.CHAIN_ID, 8, 6)}
+                {truncateAddress(summary?.chainId || LINERA_CONFIG.CHAIN_ID, 8, 6)}
               </p>
             </div>
           </div>

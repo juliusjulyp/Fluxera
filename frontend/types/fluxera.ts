@@ -162,6 +162,88 @@ export interface CrossChainMessage {
   payload: string; // JSON string
 }
 
+// === Wave 6: Multi-Chain Support Types ===
+
+/**
+ * MESSAGE STATUS
+ *
+ * Delivery status for cross-chain messages (Wave 6)
+ *
+ * RUST DEFINITION (state.rs):
+ * pub enum MessageStatus {
+ *   Sent,
+ *   Delivered,
+ *   Failed,
+ * }
+ *
+ * NOTE: GraphQL returns UPPERCASE (SENT, DELIVERED, FAILED)
+ * Use normalizeMessageStatus() to convert to display format
+ */
+export type MessageStatus = 'Sent' | 'Delivered' | 'Failed' | 'SENT' | 'DELIVERED' | 'FAILED';
+
+/**
+ * Normalize message status from API (uppercase) to display format (capitalized)
+ */
+export function normalizeMessageStatus(status: string | undefined | null): 'Sent' | 'Delivered' | 'Failed' {
+  if (!status) return 'Sent';
+  const upper = status.toUpperCase();
+  if (upper === 'DELIVERED') return 'Delivered';
+  if (upper === 'FAILED') return 'Failed';
+  return 'Sent';
+}
+
+/**
+ * ENHANCED CROSS-CHAIN MESSAGE (V2)
+ *
+ * Cross-chain message with status tracking (Wave 6)
+ *
+ * RUST DEFINITION (state.rs):
+ * pub struct CrossChainMessageV2 {
+ *   pub message_id: String,
+ *   pub source_chain: String,
+ *   pub target_chain: String,
+ *   pub message_type: String,
+ *   pub sent_at: String,
+ *   pub payload: String,
+ *   pub status: MessageStatus,
+ *   pub delivered_at: Option<String>,
+ * }
+ */
+export interface CrossChainMessageV2 {
+  messageId: string;
+  sourceChain: string;
+  targetChain: string;
+  messageType: string;
+  sentAt: string;
+  payload: string;
+  status: MessageStatus;
+  deliveredAt?: string | null;
+}
+
+/**
+ * REGISTERED CHAIN
+ *
+ * Information about a known Fluxera chain (Wave 6)
+ *
+ * RUST DEFINITION (state.rs):
+ * pub struct RegisteredChain {
+ *   pub chain_id: String,
+ *   pub name: String,
+ *   pub registered_at: String,
+ *   pub last_activity: Option<String>,
+ *   pub messages_sent: u64,
+ *   pub messages_received: u64,
+ * }
+ */
+export interface RegisteredChain {
+  chainId: string;
+  name: string;
+  registeredAt: string;
+  lastActivity?: string | null;
+  messagesSent: number;
+  messagesReceived: number;
+}
+
 /**
  * ANALYTICS SUMMARY
  *
@@ -327,4 +409,30 @@ export interface MessageFormData {
   targetChain: string;
   messageType: string;
   payload: Record<string, any>; // Object that will be JSON.stringify'd
+}
+
+// === Wave 6: Additional Response Types ===
+
+export interface GetMessageStatusResponse {
+  messageStatus: CrossChainMessageV2 | null;
+}
+
+export interface GetMessagesWithStatusResponse {
+  messagesWithStatus: CrossChainMessageV2[];
+}
+
+export interface GetPendingMessagesResponse {
+  pendingMessages: CrossChainMessageV2[];
+}
+
+export interface GetMessagesByStatusResponse {
+  messagesByStatus: CrossChainMessageV2[];
+}
+
+export interface GetRegisteredChainsResponse {
+  registeredChains: RegisteredChain[];
+}
+
+export interface GetRegisteredChainResponse {
+  registeredChain: RegisteredChain | null;
 }

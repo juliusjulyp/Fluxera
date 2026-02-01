@@ -4,13 +4,13 @@
  * VALIDATOR STATUS COMPONENT
  *
  * Displays the health and status of network validators.
- * Uses the Linera faucet API to check validator availability.
+ * - In local mode: checks local services (faucet, linera service)
+ * - In testnet mode: checks official Conway validators
  */
 
 import { useState, useEffect, useCallback } from 'react';
 import { isLocalTestingMode } from '@/lib/public-client';
 import {
-  Server,
   CheckCircle,
   XCircle,
   AlertTriangle,
@@ -18,15 +18,20 @@ import {
   Wifi,
   WifiOff,
   Globe,
+  Server,
 } from 'lucide-react';
 
-// Known testnet validators (used when connected to Conway testnet)
+// Official Linera Conway testnet validators
 const CONWAY_VALIDATORS = [
-  { name: 'BrightlyStake', url: 'https://linera-testnet.brightlystake.com:443' },
-  { name: 'ContributionDAO', url: 'https://linera-testnet-validator.contributiondao.com:443' },
-  { name: 'Everstake', url: 'https://linera.everstake.one:443' },
-  { name: 'StakeFi', url: 'https://linera-testnet.stakefi.network:443' },
-  { name: 'Runtime', url: 'https://linera-testnet.runtime-client-rpc.com:443' },
+  { name: 'Validator 1', url: 'https://validator-1.testnet-conway.linera.net' },
+  { name: 'Validator 2', url: 'https://validator-2.testnet-conway.linera.net' },
+  { name: 'Validator 3', url: 'https://validator-3.testnet-conway.linera.net' },
+];
+
+// Local network services
+const LOCAL_SERVICES = [
+  { name: 'Faucet', url: 'http://localhost:8080' },
+  { name: 'Linera Service', url: 'http://localhost:8081' },
 ];
 
 interface ValidatorHealth {
@@ -38,24 +43,26 @@ interface ValidatorHealth {
 }
 
 export default function ValidatorStatus() {
+  const isLocal = isLocalTestingMode();
+
+  const [localServices, setLocalServices] = useState<ValidatorHealth[]>(
+    LOCAL_SERVICES.map(v => ({ ...v, status: 'checking' as const }))
+  );
   const [validators, setValidators] = useState<ValidatorHealth[]>(
     CONWAY_VALIDATORS.map(v => ({ ...v, status: 'checking' as const }))
   );
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
 
-  const checkValidator = useCallback(async (validator: { name: string; url: string }): Promise<ValidatorHealth> => {
+  const checkService = useCallback(async (service: { name: string; url: string }, useCorsMod: boolean): Promise<ValidatorHealth> => {
     const start = Date.now();
     try {
-      // We can't directly ping gRPC endpoints from browser,
-      // but we can check if the host is reachable via a simple fetch with timeout
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 5000);
 
-      // Try to fetch with CORS - this will likely fail but at least tells us if host is reachable
-      await fetch(validator.url, {
+      await fetch(service.url, {
         method: 'HEAD',
-        mode: 'no-cors',
+        mode: useCorsMod ? 'cors' : 'no-cors',
         signal: controller.signal,
       });
 
@@ -63,25 +70,35 @@ export default function ValidatorStatus() {
       const latency = Date.now() - start;
 
       return {
-        ...validator,
+        ...service,
         status: latency < 2000 ? 'online' : 'degraded',
         latency,
         lastChecked: new Date(),
       };
     } catch (error) {
       const latency = Date.now() - start;
-      // If it timed out or errored, mark as offline
-      if (latency >= 5000) {
+
+      // For local services, any error means offline
+      if (useCorsMod) {
         return {
-          ...validator,
+          ...service,
           status: 'offline',
           latency,
           lastChecked: new Date(),
         };
       }
-      // Some errors might just be CORS, which means server is reachable
+
+      // For remote: timeout means offline, other errors might be CORS (degraded)
+      if (latency >= 5000) {
+        return {
+          ...service,
+          status: 'offline',
+          latency,
+          lastChecked: new Date(),
+        };
+      }
       return {
-        ...validator,
+        ...service,
         status: 'degraded',
         latency,
         lastChecked: new Date(),
@@ -91,16 +108,24 @@ export default function ValidatorStatus() {
 
   const refreshStatus = useCallback(async () => {
     setIsRefreshing(true);
-    setValidators(prev => prev.map(v => ({ ...v, status: 'checking' as const })));
 
-    const results = await Promise.all(
-      CONWAY_VALIDATORS.map(v => checkValidator(v))
+    // Check local services
+    setLocalServices(LOCAL_SERVICES.map(v => ({ ...v, status: 'checking' as const })));
+    const localResults = await Promise.all(
+      LOCAL_SERVICES.map(v => checkService(v, true))
     );
+    setLocalServices(localResults);
 
-    setValidators(results);
+    // Check Conway validators
+    setValidators(CONWAY_VALIDATORS.map(v => ({ ...v, status: 'checking' as const })));
+    const validatorResults = await Promise.all(
+      CONWAY_VALIDATORS.map(v => checkService(v, false))
+    );
+    setValidators(validatorResults);
+
     setLastUpdate(new Date());
     setIsRefreshing(false);
-  }, [checkValidator]);
+  }, [checkService]);
 
   // Check on mount and every 30 seconds
   useEffect(() => {
@@ -109,9 +134,14 @@ export default function ValidatorStatus() {
     return () => clearInterval(interval);
   }, [refreshStatus]);
 
-  const onlineCount = validators.filter(v => v.status === 'online').length;
-  const degradedCount = validators.filter(v => v.status === 'degraded').length;
-  const offlineCount = validators.filter(v => v.status === 'offline').length;
+  // Combined stats
+  const allServices = [...localServices, ...validators];
+  const onlineCount = allServices.filter(v => v.status === 'online').length;
+  const degradedCount = allServices.filter(v => v.status === 'degraded').length;
+  const offlineCount = allServices.filter(v => v.status === 'offline').length;
+
+  // Local services stats
+  const localOnline = localServices.filter(v => v.status === 'online').length;
 
   const getStatusIcon = (status: ValidatorHealth['status']) => {
     switch (status) {
@@ -139,7 +169,9 @@ export default function ValidatorStatus() {
     }
   };
 
-  const overallHealth = onlineCount >= 3 ? 'healthy' : onlineCount >= 1 ? 'degraded' : 'offline';
+  // Overall health based on local services (primary) and validators
+  const localHealthy = localOnline === localServices.length;
+  const overallHealth = localHealthy ? 'healthy' : localOnline >= 1 ? 'degraded' : 'offline';
 
   return (
     <div className="rounded-xl bg-gray-800/50 border border-gray-700 p-6">
@@ -159,8 +191,10 @@ export default function ValidatorStatus() {
             )}
           </div>
           <div>
-            <h3 className="text-lg font-semibold text-white">Validator Network</h3>
-            <p className="text-xs text-gray-400">{isLocalTestingMode() ? "Local Network Infrastructure" : "Conway Testnet Infrastructure"}</p>
+            <h3 className="text-lg font-semibold text-white">Network Status</h3>
+            <p className="text-xs text-gray-400">
+              {isLocal ? 'Local & Testnet Infrastructure' : 'Conway Testnet Infrastructure'}
+            </p>
           </div>
         </div>
 
@@ -199,45 +233,87 @@ export default function ValidatorStatus() {
         </div>
       </div>
 
-      {/* Validator List */}
-      <div className="space-y-2">
-        {validators.map((validator) => (
-          <div
-            key={validator.url}
-            className={`flex items-center justify-between p-3 rounded-lg border ${getStatusColor(validator.status)} transition-colors`}
-          >
-            <div className="flex items-center space-x-3">
-              {getStatusIcon(validator.status)}
-              <div>
-                <p className="text-sm font-medium text-white">{validator.name}</p>
-                <p className="text-xs text-gray-500 font-mono truncate max-w-[200px]">
-                  {validator.url.replace('https://', '').replace(':443', '')}
-                </p>
+      {/* Local Services Section */}
+      <div className="mb-4">
+        <div className="flex items-center space-x-2 mb-2">
+          <Server className="h-4 w-4 text-blue-400" />
+          <h4 className="text-sm font-medium text-blue-400">Local Services</h4>
+        </div>
+        <div className="space-y-2">
+          {localServices.map((service) => (
+            <div
+              key={service.url}
+              className={`flex items-center justify-between p-3 rounded-lg border ${getStatusColor(service.status)} transition-colors`}
+            >
+              <div className="flex items-center space-x-3">
+                {getStatusIcon(service.status)}
+                <div>
+                  <p className="text-sm font-medium text-white">{service.name}</p>
+                  <p className="text-xs text-gray-500 font-mono">
+                    {service.url.replace('http://', '')}
+                  </p>
+                </div>
+              </div>
+              <div className="text-right">
+                {service.latency !== undefined && service.status !== 'checking' && (
+                  <p className={`text-xs ${
+                    service.latency < 1000 ? 'text-green-400' :
+                    service.latency < 3000 ? 'text-yellow-400' : 'text-red-400'
+                  }`}>
+                    {service.latency}ms
+                  </p>
+                )}
+                {service.status === 'checking' && (
+                  <p className="text-xs text-gray-500">Checking...</p>
+                )}
               </div>
             </div>
-            <div className="text-right">
-              {validator.latency !== undefined && (
-                <p className={`text-xs ${
-                  validator.latency < 1000 ? 'text-green-400' :
-                  validator.latency < 3000 ? 'text-yellow-400' : 'text-red-400'
-                }`}>
-                  {validator.latency}ms
-                </p>
-              )}
-              {validator.status === 'checking' && (
-                <p className="text-xs text-gray-500">Checking...</p>
-              )}
+          ))}
+        </div>
+      </div>
+
+      {/* Conway Validators Section */}
+      <div>
+        <div className="flex items-center space-x-2 mb-2">
+          <Globe className="h-4 w-4 text-purple-400" />
+          <h4 className="text-sm font-medium text-purple-400">Conway Testnet Validators</h4>
+        </div>
+        <div className="space-y-2">
+          {validators.map((validator) => (
+            <div
+              key={validator.url}
+              className={`flex items-center justify-between p-3 rounded-lg border ${getStatusColor(validator.status)} transition-colors`}
+            >
+              <div className="flex items-center space-x-3">
+                {getStatusIcon(validator.status)}
+                <div>
+                  <p className="text-sm font-medium text-white">{validator.name}</p>
+                  <p className="text-xs text-gray-500 font-mono truncate max-w-[200px]">
+                    {validator.url.replace('https://', '')}
+                  </p>
+                </div>
+              </div>
+              <div className="text-right">
+                {validator.latency !== undefined && validator.status !== 'checking' && (
+                  <p className={`text-xs ${
+                    validator.latency < 1000 ? 'text-green-400' :
+                    validator.latency < 3000 ? 'text-yellow-400' : 'text-red-400'
+                  }`}>
+                    {validator.latency}ms
+                  </p>
+                )}
+                {validator.status === 'checking' && (
+                  <p className="text-xs text-gray-500">Checking...</p>
+                )}
+              </div>
             </div>
-          </div>
-        ))}
+          ))}
+        </div>
       </div>
 
       {/* Footer */}
       <div className="mt-4 pt-3 border-t border-gray-700 flex items-center justify-between text-xs text-gray-500">
-        <div className="flex items-center space-x-1">
-          <Globe className="h-3 w-3" />
-          <span>{validators.length} validators tracked</span>
-        </div>
+        <span>{localServices.length} services + {validators.length} validators tracked</span>
         {lastUpdate && (
           <span>Updated {lastUpdate.toLocaleTimeString()}</span>
         )}

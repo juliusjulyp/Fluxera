@@ -1,21 +1,22 @@
 /**
- * EVENT TRACKING FORM
+ * ON-CHAIN RECORD FORM
  *
- * Interactive form that lets users log events to the Fluxera indexer.
- * Requires wallet connection to submit events.
+ * Creates labeled records on the Linera blockchain.
+ * Each submission is a real blockchain transaction stored permanently.
  *
- * IMPORTANT: Fluxera is an INDEXER/ANALYTICS tool.
- * This form records event labels and metadata on-chain for tracking purposes.
- * It does NOT execute any token transfers, swaps, mints, or other DeFi operations.
+ * USE CASES:
+ * - Log application events with metadata
+ * - Create audit trail entries
+ * - Store timestamped records on-chain
  *
  * DUAL-MODE:
  * - Without wallet: Shows form but prompts to connect
- * - With wallet: Full functionality to log events
+ * - With wallet: Full functionality to create records
  *
  * DATA FLOW:
  * User Input → Form Submit → useTrackEvent hook →
  * LineraProvider → Fluxera WASM contract → Blockchain →
- * Success Response → Dashboard Refreshes (event appears in logs)
+ * Success Response → Record appears in chain activity
  */
 
 'use client';
@@ -96,7 +97,7 @@ export default function EventTrackingForm() {
     <div className="bg-gray-800/50 backdrop-blur-sm border border-gray-700 rounded-lg p-6">
       <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
         <Zap className="h-6 w-6 text-blue-400" />
-        Track New Event
+        Create On-Chain Record
       </h2>
 
       {/* Local testing mode indicator */}
@@ -105,7 +106,7 @@ export default function EventTrackingForm() {
           <TestTube className="h-5 w-5 text-green-400 flex-shrink-0" />
           <div>
             <p className="text-green-300 font-medium text-sm">Local Testing Mode</p>
-            <p className="text-green-400/70 text-xs">Connected to local Linera network. Events will be tracked directly via HTTP.</p>
+            <p className="text-green-400/70 text-xs">Connected to local Linera network. Records will be created directly via HTTP.</p>
           </div>
         </div>
       )}
@@ -115,8 +116,8 @@ export default function EventTrackingForm() {
         <div className="mb-4 p-4 bg-green-500/20 border border-green-500 rounded-lg flex items-start space-x-3">
           <CheckCircle className="h-5 w-5 text-green-400 flex-shrink-0 mt-0.5" />
           <div>
-            <p className="text-green-400 font-semibold">Event tracked successfully!</p>
-            <p className="text-green-300 text-sm mt-1">Event ID: {eventId}</p>
+            <p className="text-green-400 font-semibold">Record created successfully!</p>
+            <p className="text-green-300 text-sm mt-1">Record ID: {eventId}</p>
           </div>
         </div>
       )}
@@ -126,44 +127,47 @@ export default function EventTrackingForm() {
         <div className="mb-4 p-4 bg-red-500/20 border border-red-500 rounded-lg flex items-start space-x-3">
           <AlertCircle className="h-5 w-5 text-red-400 flex-shrink-0 mt-0.5" />
           <div>
-            <p className="text-red-400 font-semibold">Error tracking event</p>
+            <p className="text-red-400 font-semibold">Error creating record</p>
             <p className="text-red-300 text-sm mt-1">{error}</p>
           </div>
         </div>
       )}
 
       <form onSubmit={handleSubmit} className="space-y-4">
-        {/* Event Type Input */}
+        {/* Record Label Input */}
         <div>
           <label htmlFor="eventType" className="block text-gray-300 text-sm font-medium mb-2">
-            Event Type
+            Record Label
           </label>
           <input
             id="eventType"
             type="text"
             value={eventType}
             onChange={(e) => setEventType(e.target.value)}
-            placeholder="e.g., page_view, button_click, user_signup"
+            placeholder="e.g., audit_entry, app_log, state_snapshot"
             required
             disabled={!canSubmit}
             className="w-full px-4 py-2 bg-gray-900/50 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
           />
         </div>
 
-        {/* Custom Data Input */}
+        {/* Data Payload Input */}
         <div>
           <label htmlFor="customData" className="block text-gray-300 text-sm font-medium mb-2">
-            Custom Data (JSON or text)
+            Data Payload (JSON)
           </label>
           <textarea
             id="customData"
             value={customData}
             onChange={(e) => setCustomData(e.target.value)}
-            placeholder='{"action": "page_view", "user": "alice", "page": "/dashboard"}'
+            placeholder='{"message": "User completed checkout", "orderId": "12345"}'
             rows={4}
             disabled={!canSubmit}
             className="w-full px-4 py-2 bg-gray-900/50 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm disabled:opacity-50 disabled:cursor-not-allowed"
           />
+          <p className="text-gray-500 text-xs mt-1">
+            JSON recommended for structured data, but any text format is accepted for demo.
+          </p>
         </div>
 
         {/* Submit Button */}
@@ -175,12 +179,12 @@ export default function EventTrackingForm() {
           {loading ? (
             <>
               <Loader2 className="h-5 w-5 animate-spin" />
-              <span>Tracking Event...</span>
+              <span>Creating Record...</span>
             </>
           ) : (
             <>
               {localMode && !isConnected && <TestTube className="h-5 w-5" />}
-              <span>Track Event on Blockchain</span>
+              <span>Create Record on Blockchain</span>
             </>
           )}
         </button>
@@ -189,11 +193,11 @@ export default function EventTrackingForm() {
       {/* Info Box */}
       <div className="mt-4 p-3 bg-blue-500/10 border border-blue-500/30 rounded-lg">
         <p className="text-blue-300 text-sm">
-          💡 <strong>How it works:</strong> Fluxera is an <strong>event indexer</strong> - it records and tracks events on Linera.
+          💡 <strong>How it works:</strong> This creates a permanent, timestamped record on the Linera blockchain.
           {localMode && !isConnected ? (
-            <span> Running in <strong>local testing mode</strong> - events are sent directly to your local network.</span>
+            <span> Running in <strong>local testing mode</strong> - records are created directly on your local network.</span>
           ) : (
-            <span> Your event label and data are stored on-chain for analytics.</span>
+            <span> Your label and data are stored on-chain with your wallet address and timestamp.</span>
           )}
         </p>
       </div>

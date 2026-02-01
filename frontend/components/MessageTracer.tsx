@@ -24,8 +24,18 @@ import {
   RefreshCw,
   ChevronDown,
   ChevronUp,
+  Send,
 } from 'lucide-react';
-import { useRecentMessages, CrossChainMessage, truncateAddress, formatRelativeTime } from '@/hooks/useFluxera';
+import {
+  useRecentMessages,
+  useMessagesWithStatus,
+  CrossChainMessage,
+  truncateAddress,
+  formatRelativeTime,
+  getStatusBadgeStyle,
+} from '@/hooks/useFluxera';
+import type { MessageStatus, CrossChainMessageV2 } from '@/types/fluxera';
+import { normalizeMessageStatus } from '@/types/fluxera';
 
 // Message type colors
 const MESSAGE_TYPE_COLORS: Record<string, { bg: string; border: string; text: string }> = {
@@ -41,8 +51,44 @@ function getMessageTypeColor(messageType: string) {
   return MESSAGE_TYPE_COLORS[messageType.toLowerCase()] || MESSAGE_TYPE_COLORS.default;
 }
 
+// === Wave 6: Status Badge Component ===
+
+interface StatusBadgeProps {
+  status?: MessageStatus;
+  showLabel?: boolean;
+}
+
+function StatusBadge({ status, showLabel = true }: StatusBadgeProps) {
+  // Normalize status to handle API returning UPPERCASE
+  const normalizedStatus = normalizeMessageStatus(status);
+
+  const style = getStatusBadgeStyle(normalizedStatus);
+  const Icon = normalizedStatus === 'Delivered' ? CheckCircle : normalizedStatus === 'Failed' ? AlertCircle : Send;
+
+  return (
+    <div
+      className={`inline-flex items-center space-x-1 px-2 py-0.5 rounded-full border ${style.bgColor} ${style.borderColor}`}
+    >
+      <Icon
+        className={`h-3 w-3 ${style.textColor} ${normalizedStatus === 'Sent' ? 'animate-pulse' : ''}`}
+      />
+      {showLabel && (
+        <span className={`text-xs font-medium ${style.textColor}`}>
+          {style.label}
+        </span>
+      )}
+    </div>
+  );
+}
+
+// Extended message type that includes optional status (Wave 6)
+type MessageWithOptionalStatus = CrossChainMessage & {
+  status?: MessageStatus;
+  deliveredAt?: string | null;
+};
+
 interface MessageCardProps {
-  message: CrossChainMessage;
+  message: MessageWithOptionalStatus;
   isExpanded: boolean;
   onToggle: () => void;
 }
@@ -75,7 +121,7 @@ function MessageCard({ message, isExpanded, onToggle }: MessageCardProps) {
               {message.messageType.replace(/_/g, ' ')}
             </span>
           </div>
-          <ArrowRight className={`h-5 w-5 ${colors.text} animate-pulse`} />
+          <ArrowRight className={`h-5 w-5 ${colors.text} ${normalizeMessageStatus(message.status) !== 'Delivered' ? 'animate-pulse' : ''}`} />
         </div>
 
         {/* Right: Target Chain */}
@@ -86,8 +132,11 @@ function MessageCard({ message, isExpanded, onToggle }: MessageCardProps) {
           </p>
         </div>
 
-        {/* Timestamp & Expand */}
+        {/* Status Badge & Timestamp & Expand (Wave 6) */}
         <div className="flex items-center space-x-3 ml-4">
+          {/* Status Badge */}
+          <StatusBadge status={message.status} />
+
           <div className="text-right">
             <div className="flex items-center space-x-1 text-gray-400">
               <Clock className="h-3 w-3" />
@@ -130,6 +179,22 @@ function MessageCard({ message, isExpanded, onToggle }: MessageCardProps) {
               <p className="text-xs font-mono text-gray-300 break-all">{message.targetChain}</p>
             </div>
 
+            {/* Wave 6: Delivery Status Details */}
+            <div>
+              <p className="text-xs text-gray-500 mb-1">Status</p>
+              <StatusBadge status={message.status} showLabel={true} />
+            </div>
+
+            {/* Delivered At (Wave 6) */}
+            {message.deliveredAt && (
+              <div>
+                <p className="text-xs text-gray-500 mb-1">Delivered At</p>
+                <p className="text-xs text-green-400">
+                  {new Date(message.deliveredAt).toLocaleString()}
+                </p>
+              </div>
+            )}
+
             {/* Payload */}
             {message.payload && (
               <div className="col-span-2">
@@ -150,14 +215,28 @@ interface MessageTracerProps {
   limit?: number;
   refreshInterval?: number;
   showHeader?: boolean;
+  /** Use V2 messages with status tracking (Wave 6) */
+  useStatusTracking?: boolean;
 }
 
 export default function MessageTracer({
   limit = 10,
   refreshInterval = 5000,
   showHeader = true,
+  useStatusTracking = true,
 }: MessageTracerProps) {
-  const { messages, loading, error, refresh } = useRecentMessages(limit, refreshInterval);
+  // Use V2 hook if status tracking is enabled, otherwise use legacy
+  const legacyHook = useRecentMessages(limit, refreshInterval);
+  const v2Hook = useMessagesWithStatus(limit, refreshInterval);
+
+  // Select which hook to use based on prop
+  const { loading, error, refresh } = useStatusTracking ? v2Hook : legacyHook;
+
+  // Convert messages to unified format
+  const messages: MessageWithOptionalStatus[] = useStatusTracking
+    ? (v2Hook.messages as MessageWithOptionalStatus[])
+    : legacyHook.messages;
+
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const handleToggle = (messageId: string) => {
@@ -259,6 +338,17 @@ export default function MessageTracer({
               <span>{messages.length} messages tracked</span>
             </div>
             <div className="flex items-center space-x-4">
+              {/* Status breakdown (Wave 6) */}
+              {useStatusTracking && (
+                <>
+                  <span className="text-green-400">
+                    {messages.filter(m => normalizeMessageStatus(m.status) === 'Delivered').length} delivered
+                  </span>
+                  <span className="text-blue-400">
+                    {messages.filter(m => normalizeMessageStatus(m.status) === 'Sent').length} pending
+                  </span>
+                </>
+              )}
               {/* Unique source chains */}
               <span>
                 {new Set(messages.map(m => m.sourceChain)).size} source chains

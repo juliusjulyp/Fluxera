@@ -1,4 +1,6 @@
 # Fluxera Conway Testnet Deployment
+# This deployment info was when we deployed our dapp on conway but currently it's not deployed on conway.
+# We are focused on using docker and local development and we will switch later.
 Network: Conway Testnet
 NEXT_PUBLIC_FAUCET_URL: https://faucet.testnet-conway.linera.net
 NEXT_PUBLIC_LINERA_SERVICE=https://conway.linera.net

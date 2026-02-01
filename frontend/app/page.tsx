@@ -29,6 +29,7 @@ import {
   truncateAddress,
   formatRelativeTime,
 } from "@/hooks/useFluxera";
+import { useRealTimeEvents } from "@/hooks/useWebSocket";
 import { useWallet } from "@/components/providers/LineraProvider";
 import { LINERA_CONFIG } from "@/lib/linera-config";
 import { getQueryChainId, isLocalTestingMode } from "@/lib/public-client";
@@ -37,6 +38,7 @@ import { getQueryChainId, isLocalTestingMode } from "@/lib/public-client";
 const getNetworkName = () => isLocalTestingMode() ? "Local Network" : "Conway Testnet";
 import EventTrackingForm from "@/components/EventTrackingForm";
 import CrossChainMessageForm from "@/components/CrossChainMessageForm";
+import ChainActivityViewer from "@/components/ChainActivityViewer";
 import EventsTable from "@/components/EventsTable";
 import MessageTracer from "@/components/MessageTracer";
 import ValidatorStatus from "@/components/ValidatorStatus";
@@ -58,6 +60,18 @@ export default function Dashboard() {
   const { events, loading: eventsLoading, error: eventsError } = useRecentEvents(5);
   const { chains, loading: chainsLoading } = useChainMetrics();
 
+  /**
+   * REAL-TIME WEBSOCKET EVENTS
+   * Uses WebSocket when available, falls back to polling
+   */
+  const {
+    events: wsEvents,
+    isWebSocket,
+    isPolling,
+    status: wsStatus,
+    error: wsError,
+  } = useRealTimeEvents({ maxEvents: 50 });
+
   return (
     <>
       {/* TOP NAVBAR */}
@@ -68,6 +82,17 @@ export default function Dashboard() {
 
       {/* MAIN CONTENT */}
       <main className="ml-64 mt-16 min-h-screen bg-gray-900 text-gray-100 p-6">
+        {/* WEBSOCKET STATUS BANNER */}
+        {isWebSocket && (
+          <div className="mb-4 flex items-center justify-between rounded-lg bg-green-900/20 border border-green-500/30 p-3">
+            <div className="flex items-center space-x-2">
+              <div className="h-2 w-2 rounded-full bg-green-500 animate-pulse" />
+              <span className="text-sm text-green-400">WebSocket connected - Real-time updates enabled</span>
+            </div>
+            <span className="text-xs text-green-500">{wsEvents.length} live events</span>
+          </div>
+        )}
+
         {/* CONNECTION STATUS BANNER */}
         {summaryError && (
           <div className="mb-6 flex items-center space-x-2 rounded-lg bg-red-900/20 border border-red-500/30 p-4 text-red-400">
@@ -206,7 +231,7 @@ export default function Dashboard() {
                     <span className="text-lg text-gray-400">Loading...</span>
                   </div>
                 ) : (
-                  <p className="text-3xl font-bold mt-1 tabular-nums">{chains?.length || '1'}</p>
+                  <p className="text-3xl font-bold mt-1 tabular-nums">{LINERA_CONFIG.getConfiguredChains().length || chains?.length || '1'}</p>
                 )}
                 <div className="flex items-center space-x-1 mt-2">
                   <Globe className="h-3 w-3 text-yellow-400" />
@@ -222,11 +247,16 @@ export default function Dashboard() {
 
         {/* INTERACTIVE FORMS SECTION */}
         <div className="mb-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
-          {/* Event Tracking Form */}
+          {/* On-Chain Record Form */}
           <EventTrackingForm />
 
           {/* Cross-Chain Message Form */}
           <CrossChainMessageForm />
+        </div>
+
+        {/* CHAIN ACTIVITY VIEWER - Real records from all chains */}
+        <div className="mb-6">
+          <ChainActivityViewer refreshInterval={10000} eventsPerChain={10} />
         </div>
 
         {/* MESSAGE TRACER - Cross-chain message visualization */}
@@ -381,18 +411,34 @@ export default function Dashboard() {
                 </div>
               </div>
 
-              {/* Auto-Refresh Info */}
-              <div className="flex items-center justify-between rounded-lg bg-blue-900/20 border border-blue-500/30 p-3">
+              {/* Real-Time Status */}
+              <div className={`flex items-center justify-between rounded-lg p-3 ${
+                isWebSocket
+                  ? 'bg-green-900/20 border border-green-500/30'
+                  : 'bg-blue-900/20 border border-blue-500/30'
+              }`}>
                 <div className="flex items-center space-x-3">
-                  <Activity className="h-4 w-4 text-blue-400 animate-spin" />
+                  {isWebSocket ? (
+                    <Zap className="h-4 w-4 text-green-400" />
+                  ) : (
+                    <Activity className="h-4 w-4 text-blue-400 animate-spin" />
+                  )}
                   <div>
-                    <p className="text-sm font-medium text-blue-300">Auto-Refresh</p>
-                    <p className="text-xs text-blue-400">Real-time polling active</p>
+                    <p className={`text-sm font-medium ${isWebSocket ? 'text-green-300' : 'text-blue-300'}`}>
+                      {isWebSocket ? 'WebSocket Connected' : 'Polling Mode'}
+                    </p>
+                    <p className={`text-xs ${isWebSocket ? 'text-green-400' : 'text-blue-400'}`}>
+                      {isWebSocket ? 'Real-time streaming active' : wsStatus === 'connecting' ? 'Connecting to WebSocket...' : 'Fallback polling active'}
+                    </p>
                   </div>
                 </div>
                 <div className="text-right">
-                  <p className="text-xs text-blue-400">5s interval</p>
-                  <p className="text-xs text-blue-500">Live data</p>
+                  <p className={`text-xs ${isWebSocket ? 'text-green-400' : 'text-blue-400'}`}>
+                    {isWebSocket ? 'Instant' : '5s interval'}
+                  </p>
+                  <p className={`text-xs ${isWebSocket ? 'text-green-500' : 'text-blue-500'}`}>
+                    {wsEvents.length} events
+                  </p>
                 </div>
               </div>
             </div>

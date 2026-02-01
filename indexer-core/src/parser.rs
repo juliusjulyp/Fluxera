@@ -1,6 +1,6 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use crate::listener::RawLineraEvent;
+use crate::listener::{FluxeraEvent, FluxeraMessage};
 
 /// Normalized event structure for our database
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -63,46 +63,77 @@ impl EventParser {
     pub fn new() -> Self {
         Self {}
     }
-    
-    /// Parse raw Linera event into normalized format
-    pub fn parse(&self, raw_event: RawLineraEvent) -> Result<NormalizedEvent> {
-        let event_type = match raw_event.event_type {
-            crate::listener::LineraEventType::Transaction => EventType::Transaction,
-            crate::listener::LineraEventType::ApplicationCall => EventType::ContractEvent,
-            crate::listener::LineraEventType::BlockConfirmation => EventType::BlockFinalized,
-            crate::listener::LineraEventType::BlockProposal => EventType::BlockFinalized,
-            crate::listener::LineraEventType::CrossChainMessage => EventType::StateChange,
+
+    /// Parse a Fluxera analytics event into normalized format
+    pub fn parse_fluxera_event(&self, event: &FluxeraEvent) -> Result<NormalizedEvent> {
+        // Parse timestamp - try to parse as number first, then as string
+        let timestamp = event.timestamp.parse::<u64>().unwrap_or_else(|_| {
+            // Try parsing as ISO date string
+            chrono::DateTime::parse_from_rfc3339(&event.timestamp)
+                .map(|dt| dt.timestamp_millis() as u64)
+                .unwrap_or(0)
+        });
+
+        let event_type = match event.event_type.as_str() {
+            "transfer" | "transaction" => EventType::Transaction,
+            "interaction" | "contract_call" => EventType::ContractEvent,
+            "state_change" => EventType::StateChange,
+            _ => EventType::ContractEvent, // Default to contract event for custom types
         };
-        
-        // Generate unique ID for this event
-        let id = format!("{}_{}_{}",
-            raw_event.chain_id,
-            raw_event.block_height.0,
-            raw_event.timestamp.micros()
-        );
-        
-        let normalized = NormalizedEvent {
-            id,
-            event_type: event_type.clone(),
-            block_height: raw_event.block_height.0,
-            microchain_id: raw_event.chain_id.to_string(),
-            timestamp: raw_event.timestamp.micros(),
-            transaction_data: raw_event.transaction_data.map(|td| TransactionData {
-                transaction_id: td.hash.to_string(),
-                from_address: td.authenticated_signer.unwrap_or("unknown".to_string()),
-                to_address: "unknown".to_string(), // Not available in raw data
-                amount: 0, // Not available in raw data
-                gas_used: 0, // Not available in raw data
-                status: TransactionStatus::Success,
+
+        // Parse event data as JSON if possible
+        let event_data: serde_json::Value = serde_json::from_str(&event.data)
+            .unwrap_or_else(|_| serde_json::json!({ "raw": event.data }));
+
+        Ok(NormalizedEvent {
+            id: event.event_id.clone(),
+            event_type,
+            block_height: 0, // Not available in Fluxera events
+            microchain_id: event.chain_id.clone(),
+            timestamp,
+            transaction_data: None,
+            contract_event_data: Some(ContractEventData {
+                contract_address: event.chain_id.clone(),
+                event_name: event.event_type.clone(),
+                event_data,
             }),
-            contract_event_data: raw_event.application_data.map(|ad| ContractEventData {
-                contract_address: ad.application_id.to_string(),
-                event_name: ad.operation,
-                event_data: serde_json::json!({}), // BCS data would need decoding
+            state_change_data: None,
+        })
+    }
+
+    /// Parse a Fluxera cross-chain message into normalized format
+    pub fn parse_fluxera_message(&self, message: &FluxeraMessage) -> Result<NormalizedEvent> {
+        // Parse timestamp
+        let timestamp = message.sent_at.parse::<u64>().unwrap_or_else(|_| {
+            chrono::DateTime::parse_from_rfc3339(&message.sent_at)
+                .map(|dt| dt.timestamp_millis() as u64)
+                .unwrap_or(0)
+        });
+
+        // Create message data as JSON
+        let message_data = serde_json::json!({
+            "message_id": message.message_id,
+            "source_chain": message.source_chain,
+            "target_chain": message.target_chain,
+            "message_type": message.message_type,
+            "payload": message.payload,
+            "status": message.status,
+            "delivered_at": message.delivered_at,
+        });
+
+        Ok(NormalizedEvent {
+            id: format!("msg_{}", message.message_id),
+            event_type: EventType::StateChange, // Cross-chain messages are state changes
+            block_height: 0,
+            microchain_id: message.source_chain.clone(),
+            timestamp,
+            transaction_data: None,
+            contract_event_data: Some(ContractEventData {
+                contract_address: message.target_chain.clone(),
+                event_name: format!("CrossChainMessage:{}", message.message_type),
+                event_data: message_data,
             }),
-            state_change_data: None, // Would need to be parsed from specific event types
-        };
-        
-        Ok(normalized)
+            state_change_data: None,
+        })
     }
 }
